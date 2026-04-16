@@ -2,9 +2,9 @@
   "name": "backend",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch dev/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/index.js",
+    "start": "node dist/dev/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
