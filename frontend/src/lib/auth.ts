@@ -25,6 +25,13 @@ export async function validateEmailAgainstBackend(email: string): Promise<Authen
     cache: "no-store"
   });
 
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "El backend no devolvio JSON. Revisa BACKEND_BASE_URL o la proteccion del deployment."
+    );
+  }
+
   const payload = (await response.json()) as BackendAuthSuccess | BackendAuthFailure;
 
   if (!response.ok || !payload.ok) {
