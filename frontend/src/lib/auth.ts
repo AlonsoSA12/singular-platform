@@ -3,11 +3,13 @@ import type { AuthenticatedUser } from "@/lib/types";
 
 type BackendAuthSuccess = {
   ok: true;
+  authenticated: true;
   user: AuthenticatedUser;
 };
 
 type BackendAuthFailure = {
   ok: false;
+  authenticated: false;
   message?: string;
 };
 

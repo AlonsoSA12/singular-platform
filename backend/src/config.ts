@@ -24,6 +24,7 @@ export function getAirtableConfig() {
     airtableBaseId: required("AIRTABLE_BASE_ID"),
     airtableTableName: required("AIRTABLE_TABLE_NAME"),
     airtableEmailField: required("AIRTABLE_EMAIL_FIELD"),
-    airtableNameField: process.env.AIRTABLE_NAME_FIELD ?? ""
+    airtableNameField: process.env.AIRTABLE_NAME_FIELD ?? "",
+    airtableRoleField: required("AIRTABLE_ROLE_FIELD")
   };
 }

@@ -93,8 +93,10 @@ export async function readSession() {
   }
 
   return {
+    authenticated: true,
     email: session.email,
-    name: session.name
+    name: session.name,
+    role: session.role
   } satisfies AuthenticatedUser;
 }
 

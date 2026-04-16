@@ -33,6 +33,7 @@ export default async function WorkspacePage() {
             <div>
               <p className="user-name">{userLabel}</p>
               <p className="user-email">{user.email}</p>
+              <p className="user-email">{user.role ?? "Sin role"}</p>
             </div>
           </div>
 

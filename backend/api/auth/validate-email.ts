@@ -13,6 +13,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           ok: false,
+          authenticated: false,
           message: "El email es obligatorio."
         },
         { status: 400 }
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           ok: false,
+          authenticated: false,
           message: "Email no autorizado."
         },
         { status: 401 }
@@ -32,6 +34,7 @@ export async function POST(request: Request) {
 
     return Response.json({
       ok: true,
+      authenticated: true,
       user
     });
   } catch (error) {
@@ -43,6 +46,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         ok: false,
+        authenticated: false,
         message
       },
       { status: 500 }

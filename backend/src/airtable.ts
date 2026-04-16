@@ -26,6 +26,7 @@ export async function findUserByEmail(email: string) {
   url.searchParams.set("maxRecords", "1");
   url.searchParams.set("filterByFormula", filterByFormula);
   url.searchParams.append("fields[]", airtableConfig.airtableEmailField);
+  url.searchParams.append("fields[]", airtableConfig.airtableRoleField);
 
   if (airtableConfig.airtableNameField) {
     url.searchParams.append("fields[]", airtableConfig.airtableNameField);
@@ -54,9 +55,12 @@ export async function findUserByEmail(email: string) {
   const rawName = airtableConfig.airtableNameField
     ? record.fields[airtableConfig.airtableNameField]
     : null;
+  const rawRole = record.fields[airtableConfig.airtableRoleField];
 
   return {
+    authenticated: true,
     email: normalizedEmail,
-    name: rawName ? String(rawName) : null
+    name: rawName ? String(rawName) : null,
+    role: rawRole ? String(rawRole) : null
   };
 }
