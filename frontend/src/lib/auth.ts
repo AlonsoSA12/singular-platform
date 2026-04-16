@@ -1,4 +1,4 @@
-import { getFrontendServerEnv } from "@/lib/env";
+import { getBackendBaseUrl } from "@/lib/env";
 import type { AuthenticatedUser } from "@/lib/types";
 
 type BackendAuthSuccess = {
@@ -12,7 +12,7 @@ type BackendAuthFailure = {
 };
 
 export async function validateEmailAgainstBackend(email: string): Promise<AuthenticatedUser> {
-  const { backendBaseUrl } = getFrontendServerEnv();
+  const backendBaseUrl = getBackendBaseUrl();
 
   const response = await fetch(`${backendBaseUrl}/auth/validate-email`, {
     method: "POST",

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
-import { getFrontendServerEnv } from "@/lib/env";
+import { getOptionalSessionSecret, getRequiredSessionSecret } from "@/lib/env";
 import type { AuthenticatedUser } from "@/lib/types";
 
 const SESSION_COOKIE = "singular_platform_session";
@@ -57,7 +57,7 @@ function parseSessionCookie(cookieValue: string, secret: string) {
 }
 
 export async function createSession(user: AuthenticatedUser) {
-  const { sessionSecret } = getFrontendServerEnv();
+  const sessionSecret = getRequiredSessionSecret();
   const payload: SessionPayload = {
     ...user,
     exp: Date.now() + SESSION_DURATION_MS
@@ -74,7 +74,11 @@ export async function createSession(user: AuthenticatedUser) {
 }
 
 export async function readSession() {
-  const { sessionSecret } = getFrontendServerEnv();
+  const sessionSecret = getOptionalSessionSecret();
+  if (!sessionSecret) {
+    return null;
+  }
+
   const cookieStore = await cookies();
   const rawCookie = cookieStore.get(SESSION_COOKIE)?.value;
 

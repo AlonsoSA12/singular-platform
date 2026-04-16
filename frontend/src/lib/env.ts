@@ -12,10 +12,14 @@ function ensureEnvLoaded() {
   envLoaded = true;
 }
 
-function requireEnv(name: string) {
+function readEnv(name: string) {
   ensureEnvLoaded();
 
-  const value = process.env[name];
+  return process.env[name];
+}
+
+function requireEnv(name: string) {
+  const value = readEnv(name);
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
@@ -23,9 +27,14 @@ function requireEnv(name: string) {
   return value;
 }
 
-export function getFrontendServerEnv() {
-  return {
-    backendBaseUrl: requireEnv("BACKEND_BASE_URL"),
-    sessionSecret: requireEnv("SESSION_SECRET")
-  };
+export function getBackendBaseUrl() {
+  return requireEnv("BACKEND_BASE_URL");
+}
+
+export function getOptionalSessionSecret() {
+  return readEnv("SESSION_SECRET");
+}
+
+export function getRequiredSessionSecret() {
+  return requireEnv("SESSION_SECRET");
 }
