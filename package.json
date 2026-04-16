@@ -4,7 +4,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "concurrently \"corepack pnpm --filter backend dev\" \"corepack pnpm --filter frontend dev\"",
-    "build": "corepack pnpm --filter backend build && corepack pnpm --filter frontend build",
+    "build": "corepack pnpm --filter backend compile && corepack pnpm --filter frontend build",
     "typecheck": "corepack pnpm --filter backend typecheck && corepack pnpm --filter frontend typecheck"
   },
   "devDependencies": {
