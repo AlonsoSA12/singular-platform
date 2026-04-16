@@ -10,3 +10,4 @@ coverage
 .vercel
 frontend/.vercel
 backend/.vercel
+.github/instructions/codacy.instructions.md
