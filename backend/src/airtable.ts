@@ -12,10 +12,14 @@ type AirtableResponse = {
 
 type TrustworthinessRecordUpdateFields = {
   "Credibility Points"?: number | null;
+  "Credibility AI JSON"?: string | null;
   "Feedback"?: string;
   "Group Thinking Points"?: number | null;
+  "Group Thinking Points AI JSON"?: string | null;
   "Intimacy Points"?: number | null;
+  "Intimacy AI JSON"?: string | null;
   "Reliability Points"?: number | null;
+  "Reliability AI JSON"?: string | null;
 };
 
 type FetchAirtableRecordsOptions = {
@@ -58,6 +62,43 @@ type CoachingEvidenceMeeting = {
 
 type Confidence = "low" | "medium" | "high";
 type PillarKey = "reliability" | "intimacy" | "groupThinking" | "credibility";
+type FeedbackGenerationInput = {
+  evaluatedName: string;
+  existingFeedback?: string | null;
+  pillars: Record<
+    PillarKey,
+    {
+      aiSuggestion?: unknown;
+      meaning: string;
+      points: number;
+    }
+  >;
+  projectContext?: string | null;
+  roleLabel?: string | null;
+};
+export type TrustworthinessSuggestionStage =
+  | "validating_evaluation_data"
+  | "fetching_airtable_meetings"
+  | "building_meeting_evidence"
+  | "sending_context_to_ai"
+  | "validating_structured_response"
+  | "calculating_tw_score";
+
+export const TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS: Record<
+  TrustworthinessSuggestionStage,
+  string
+> = {
+  validating_evaluation_data: "Validando datos de la evaluación",
+  fetching_airtable_meetings: "Consultando reuniones en Airtable",
+  building_meeting_evidence: "Preparando evidencia de reuniones",
+  sending_context_to_ai: "Enviando contexto a IA",
+  validating_structured_response: "Validando respuesta estructurada",
+  calculating_tw_score: "Calculando score final de TW"
+};
+
+type TrustworthinessSuggestionStageEmitter = (
+  stage: TrustworthinessSuggestionStage
+) => void | Promise<void>;
 
 const TRUSTWORTHINESS_START_FIELD = "Start Date Range";
 const TRUSTWORTHINESS_END_FIELD = "End Date Range";
@@ -1222,6 +1263,17 @@ const TW_SUGGESTION_SCHEMA = {
   }
 };
 
+const FEEDBACK_SUGGESTION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["feedback"],
+  properties: {
+    feedback: {
+      type: "string"
+    }
+  }
+};
+
 function extractOpenAIOutputText(payload: unknown) {
   if (isPlainRecord(payload) && typeof payload.output_text === "string") {
     return payload.output_text;
@@ -1351,6 +1403,119 @@ async function callOpenAIForSuggestion(meetings: CoachingEvidenceMeeting[]) {
   }
 }
 
+function createFeedbackPrompt(input: FeedbackGenerationInput) {
+  const pillarLines = (Object.entries(input.pillars) as Array<
+    [PillarKey, FeedbackGenerationInput["pillars"][PillarKey]]
+  >)
+    .map(([pillarKey, pillar]) => {
+      const aiContext =
+        pillar.aiSuggestion !== undefined && pillar.aiSuggestion !== null
+          ? JSON.stringify(pillar.aiSuggestion, null, 2)
+          : "No AI context available for this pillar.";
+
+      return [
+        `${pillarKey.toUpperCase()}`,
+        `points: ${pillar.points}/10`,
+        `meaning: ${pillar.meaning}`,
+        `ai_context:`,
+        aiContext
+      ].join("\n");
+    })
+    .join("\n\n");
+
+  return [
+    "You are writing a final performance feedback narrative for a trustworthiness evaluation.",
+    "Write in professional English.",
+    "Return one concise final narrative in 1 or 2 short paragraphs.",
+    "Do not use bullets, headers, markdown, JSON, or labels.",
+    "Do not mention AI, confidence scores, or that a model generated the text.",
+    "Use the pillar points and meanings as the source of truth.",
+    "If AI context is available for a pillar, use it as supporting evidence and nuance.",
+    "Balance strengths, risks, and concrete improvement areas.",
+    "If evidence is limited, say so briefly in natural language without sounding robotic.",
+    "",
+    `Evaluated person: ${input.evaluatedName}`,
+    `Role: ${input.roleLabel && input.roleLabel.trim().length > 0 ? input.roleLabel : "Unknown"}`,
+    `Project context: ${
+      input.projectContext && input.projectContext.trim().length > 0
+        ? input.projectContext
+        : "No project context available"
+    }`,
+    `Existing feedback draft: ${
+      input.existingFeedback && input.existingFeedback.trim().length > 0
+        ? input.existingFeedback
+        : "None"
+    }`,
+    "",
+    "Pillar data:",
+    pillarLines,
+    "",
+    'Return JSON with this shape only: {"feedback":"..."}'
+  ].join("\n");
+}
+
+async function callOpenAIForFeedback(input: FeedbackGenerationInput) {
+  const openAIConfig = getOpenAIConfig();
+
+  if (!openAIConfig.apiKey || !openAIConfig.model) {
+    throw new Error("No hay modelo configurado para generar feedback.");
+  }
+
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    body: JSON.stringify({
+      input: createFeedbackPrompt(input),
+      model: openAIConfig.model,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "tw_feedback",
+          strict: true,
+          schema: FEEDBACK_SUGGESTION_SCHEMA
+        }
+      }
+    }),
+    headers: {
+      Authorization: `Bearer ${openAIConfig.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    let message = `OpenAI request failed with status ${response.status}`;
+
+    try {
+      const payload = (await response.json()) as { error?: { message?: string } };
+      if (payload.error?.message) {
+        message = payload.error.message;
+      }
+    } catch {
+      message = `OpenAI request failed with status ${response.status}`;
+    }
+
+    throw new Error(message);
+  }
+
+  const payload = await response.json();
+  const outputText = extractOpenAIOutputText(payload);
+
+  if (!outputText) {
+    throw new Error("No fue posible generar el feedback con IA.");
+  }
+
+  try {
+    const parsedOutput = JSON.parse(outputText) as { feedback?: unknown };
+
+    if (typeof parsedOutput.feedback !== "string" || parsedOutput.feedback.trim().length === 0) {
+      throw new Error("No fue posible generar el feedback con IA.");
+    }
+
+    return parsedOutput.feedback.trim();
+  } catch {
+    throw new Error("No fue posible generar el feedback con IA.");
+  }
+}
+
 export async function getCoachingInputLogTranscript(
   recordId: string,
   participantEmail: string,
@@ -1401,13 +1566,16 @@ export async function createTrustworthinessSuggestion(
   recordId: string,
   participantEmail: string,
   activeSessionEmail: string | undefined,
-  explicitRange: DateRangeLiteral
+  explicitRange: DateRangeLiteral,
+  emitStage?: TrustworthinessSuggestionStageEmitter
 ) {
+  await emitStage?.("fetching_airtable_meetings");
   const records = await fetchCoachingInputLogRecordsForContext(
     participantEmail,
     activeSessionEmail,
     explicitRange
   );
+  await emitStage?.("building_meeting_evidence");
   const meetings = records.map(createCoachingEvidenceMeeting).filter(hasEvidenceText);
 
   if (records.length === 0) {
@@ -1418,8 +1586,10 @@ export async function createTrustworthinessSuggestion(
     throw new Error("Hay reuniones, pero no hay evidencia textual suficiente.");
   }
 
+  await emitStage?.("sending_context_to_ai");
   const suggestionPayload = await callOpenAIForSuggestion(meetings);
 
+  await emitStage?.("validating_structured_response");
   if (!isPlainRecord(suggestionPayload) || !isPlainRecord(suggestionPayload.pillars)) {
     throw new Error("No fue posible generar una sugerencia estructurada. Intenta regenerar.");
   }
@@ -1446,6 +1616,7 @@ export async function createTrustworthinessSuggestion(
       meetings.length
     )
   };
+  await emitStage?.("calculating_tw_score");
   const score = calculateTrustworthinessScore({
     credibility: pillars.credibility.points,
     groupThinking: pillars.groupThinking.points,
@@ -1472,4 +1643,33 @@ export async function createTrustworthinessSuggestion(
       score
     }
   };
+}
+
+export async function createTrustworthinessFeedback(
+  recordId: string,
+  evaluatorEmail: string,
+  input: FeedbackGenerationInput
+) {
+  const tableName = getTrustworthinessTableName();
+  const [existingRecord] = await fetchRecordsByIds(tableName, [recordId], []);
+
+  if (!existingRecord) {
+    throw new Error("No se encontró la evaluación solicitada.");
+  }
+
+  canEditTrustworthinessRecord(existingRecord, evaluatorEmail);
+
+  for (const [pillarKey, pillar] of Object.entries(input.pillars) as Array<
+    [PillarKey, FeedbackGenerationInput["pillars"][PillarKey]]
+  >) {
+    if (!Number.isInteger(pillar.points) || pillar.points < 1 || pillar.points > 10) {
+      throw new Error(`El pilar ${pillarKey} no tiene un puntaje válido para generar feedback.`);
+    }
+
+    if (typeof pillar.meaning !== "string" || pillar.meaning.trim().length === 0) {
+      throw new Error(`El pilar ${pillarKey} no tiene meaning suficiente para generar feedback.`);
+    }
+  }
+
+  return callOpenAIForFeedback(input);
 }

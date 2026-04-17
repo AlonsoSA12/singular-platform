@@ -51,10 +51,14 @@ type TrustworthinessFailure = {
 
 type UpdateTrustworthinessPayload = {
   credibilityPoints?: number | null;
+  credibilityAiJson?: string | null;
   feedback?: string;
   groupThinkingPoints?: number | null;
+  groupThinkingAiJson?: string | null;
   intimacyPoints?: number | null;
+  intimacyAiJson?: string | null;
   reliabilityPoints?: number | null;
+  reliabilityAiJson?: string | null;
 };
 
 type CoachingTranscriptSuccess = {
@@ -82,6 +86,21 @@ type SuggestionPayload = {
   end: string;
   participantEmail: string;
   start: string;
+};
+
+type FeedbackSuggestionPayload = {
+  evaluatedName: string;
+  existingFeedback?: string | null;
+  pillars: Record<
+    "reliability" | "intimacy" | "groupThinking" | "credibility",
+    {
+      aiSuggestion?: unknown;
+      meaning: string;
+      points: number;
+    }
+  >;
+  projectContext?: string | null;
+  roleLabel?: string | null;
 };
 
 export async function fetchTrustworthinessFromBackend(
@@ -265,4 +284,46 @@ export async function fetchTrustworthinessSuggestionFromBackend(
   }
 
   return parsedPayload;
+}
+
+export async function generateTrustworthinessFeedbackInBackend(
+  recordId: string,
+  evaluatorEmail: string,
+  payload: FeedbackSuggestionPayload
+) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const url = new URL(
+    `${backendBaseUrl}/trustworthiness/${encodeURIComponent(recordId)}/feedback-suggestion`
+  );
+
+  url.searchParams.set("evaluatorEmail", evaluatorEmail);
+
+  const response = await fetch(url, {
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "El backend no devolvio JSON. Revisa BACKEND_BASE_URL o la proteccion del deployment."
+    );
+  }
+
+  const parsedPayload = (await response.json()) as
+    | { feedback?: string; ok?: boolean }
+    | TrustworthinessFailure;
+
+  if (!response.ok || !("ok" in parsedPayload && parsedPayload.ok && typeof parsedPayload.feedback === "string")) {
+    const message =
+      "message" in parsedPayload && typeof parsedPayload.message === "string"
+        ? parsedPayload.message
+        : undefined;
+    throw new Error(message ?? "No fue posible generar el feedback con IA.");
+  }
+
+  return parsedPayload.feedback;
 }
