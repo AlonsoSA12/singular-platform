@@ -28,8 +28,13 @@ export function LogoutButton() {
 
   return (
     <div className="logout-block">
-      <button className="secondary-button" disabled={isPending} onClick={handleLogout} type="button">
-        {isPending ? "Saliendo..." : "Cerrar sesion"}
+      <button className="user-menu-action-button" disabled={isPending} onClick={handleLogout} type="button">
+        <span aria-hidden="true" className="user-menu-action-icon">
+          <svg viewBox="0 0 24 24">
+            <path d="M13 4a1 1 0 1 1 2 0v6a1 1 0 1 1-2 0V4ZM8.1 6.5a1 1 0 0 1 1.4 1.43A6 6 0 1 0 14 6.1a1 1 0 1 1 .66-1.89A8 8 0 1 1 8.1 6.5Z" />
+          </svg>
+        </span>
+        <span>{isPending ? "Saliendo..." : "Cerrar sesion"}</span>
       </button>
       {error ? <p className="mini-error">{error}</p> : null}
     </div>

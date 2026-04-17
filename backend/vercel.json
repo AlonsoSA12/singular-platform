@@ -7,6 +7,10 @@
     {
       "source": "/auth/validate-email",
       "destination": "/api/auth/validate-email"
+    },
+    {
+      "source": "/trustworthiness",
+      "destination": "/api/trustworthiness"
     }
   ]
 }

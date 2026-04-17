@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-import { LogoutButton } from "@/components/logout-button";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { WorkspaceShellContent } from "@/components/workspace-shell-content";
 import { readSession } from "@/lib/session";
 
 export default async function WorkspacePage() {
@@ -14,45 +13,39 @@ export default async function WorkspacePage() {
   const userInitial = userLabel.charAt(0).toUpperCase();
 
   return (
-    <main className="workspace-page">
-      <aside className="workspace-sidebar">
-        <div className="sidebar-header">
-          <p className="eyebrow">Workspace</p>
-          <h1>Singular Platform</h1>
+    <main className="workspace-shell">
+      <aside className="workspace-rail" aria-label="Primary">
+        <div className="workspace-rail-brand">
+          <div className="workspace-rail-logo" aria-hidden="true">
+            S
+          </div>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Primary">
-          <button className="nav-item nav-item-active" type="button">
-            Trustworthiness
+        <nav className="workspace-rail-nav">
+          <button
+            className="workspace-rail-link is-active"
+            title="Monthly Trustworthiness"
+            type="button"
+          >
+            <span className="workspace-rail-link-icon" aria-hidden="true">
+              TW
+            </span>
+            <span className="workspace-rail-link-label">Monthly</span>
           </button>
         </nav>
 
-        <div className="sidebar-footer">
-          <div className="user-card">
-            <div className="user-avatar">{userInitial}</div>
-            <div>
-              <p className="user-name">{userLabel}</p>
-              <p className="user-email">{user.email}</p>
-              <p className="user-email">{user.role ?? "Sin role"}</p>
-            </div>
-          </div>
-
-          <div className="sidebar-actions">
-            <button className="secondary-button" type="button">
-              Settings
-            </button>
-            <ThemeToggle />
-            <LogoutButton />
+        <div className="workspace-rail-footer">
+          <div className="workspace-rail-user-badge" aria-hidden="true">
+            {userInitial}
           </div>
         </div>
       </aside>
 
-      <section className="workspace-main">
-        <div className="workspace-header">
-          <p className="eyebrow">Trustworthiness</p>
-          <h2>Bienvenidos</h2>
-        </div>
-      </section>
+      <WorkspaceShellContent
+        userInitial={userInitial}
+        userLabel={userLabel}
+        userRole={user.role ?? "Sin role"}
+      />
     </main>
   );
 }

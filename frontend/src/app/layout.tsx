@@ -1,15 +1,26 @@
 import type { Metadata } from "next";
+import { JetBrains_Mono, Poppins } from "next/font/google";
 import "./globals.css";
+
+const poppins = Poppins({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-poppins",
+  display: "swap"
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap"
+});
 
 const themeInitializer = `
   try {
     const savedTheme = localStorage.getItem("singular-platform-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const theme = savedTheme === "dark" || savedTheme === "light"
       ? savedTheme
-      : prefersDark
-        ? "dark"
-        : "light";
+      : "dark";
     document.documentElement.dataset.theme = theme;
   } catch {}
 `;
@@ -25,7 +36,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" suppressHydrationWarning>
+    <html className={`${poppins.variable} ${jetbrainsMono.variable}`} lang="es" suppressHydrationWarning>
       <body>
         <script dangerouslySetInnerHTML={{ __html: themeInitializer }} />
         {children}
