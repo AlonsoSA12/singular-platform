@@ -1,4 +1,5 @@
 import { getBackendBaseUrl } from "@/lib/env";
+import { fetchFromBackend } from "@/lib/backend";
 
 type TrustworthinessRecord = {
   id: string;
@@ -177,7 +178,7 @@ export async function fetchTrustworthinessFromBackend(
 
   url.searchParams.set("evaluatorEmail", evaluatorEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     cache: "no-store"
   });
 
@@ -208,7 +209,7 @@ export async function updateTrustworthinessRecordInBackend(
 
   url.searchParams.set("evaluatorEmail", evaluatorEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     body: JSON.stringify(payload),
     headers: {
       "Content-Type": "application/json"
@@ -248,7 +249,7 @@ export async function fetchCoachingContextFromBackend(
   url.searchParams.set("activeEmail", activeSessionEmail);
   url.searchParams.set("participantEmail", participantEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     cache: "no-store"
   });
 
@@ -285,7 +286,7 @@ export async function fetchCoachingTranscriptFromBackend(
   url.searchParams.set("activeEmail", activeSessionEmail);
   url.searchParams.set("participantEmail", participantEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     cache: "no-store"
   });
   const contentType = response.headers.get("content-type") ?? "";
@@ -319,7 +320,7 @@ export async function fetchTrustworthinessSuggestionFromBackend(
   url.searchParams.set("activeEmail", activeSessionEmail);
   url.searchParams.set("evaluatorEmail", evaluatorEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     body: JSON.stringify(payload),
     cache: "no-store",
     headers: {
@@ -359,7 +360,7 @@ export async function generateTrustworthinessFeedbackInBackend(
 
   url.searchParams.set("evaluatorEmail", evaluatorEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     body: JSON.stringify(payload),
     cache: "no-store",
     headers: {
@@ -403,7 +404,7 @@ export async function startTrustworthinessAssistantSessionInBackend(
   url.searchParams.set("activeEmail", activeSessionEmail);
   url.searchParams.set("evaluatorEmail", evaluatorEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     body: JSON.stringify(payload),
     cache: "no-store",
     headers: {
@@ -441,7 +442,7 @@ export async function sendTrustworthinessAssistantMessageToBackend(
     `${backendBaseUrl}/trustworthiness/${encodeURIComponent(recordId)}/assistant/message`
   );
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     body: JSON.stringify(payload),
     cache: "no-store",
     headers: {
@@ -482,7 +483,7 @@ export async function saveTrustworthinessAssistantProposalInBackend(
 
   url.searchParams.set("evaluatorEmail", evaluatorEmail);
 
-  const response = await fetch(url, {
+  const response = await fetchFromBackend(url, {
     body: JSON.stringify(payload),
     cache: "no-store",
     headers: {

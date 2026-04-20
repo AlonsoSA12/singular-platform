@@ -1,26 +1,41 @@
 # Deployments y Ambientes
 
-Esta guía documenta el modelo objetivo de GitHub + Vercel que vamos a manejar para `Singular Platform`.
+Estado operativo verificado el 19 de abril de 2026.
 
-Por ahora el foco es dejar bien definida la operación de:
+Esta guia documenta como vamos a manejar GitHub y Vercel en `Singular Platform` a partir de ahora.
 
-- GitHub
-- ambiente remoto de desarrollo
-- ambiente remoto de preview
-
-`Production` queda planificado, pero fuera del alcance inmediato.
-
-## Resumen ejecutivo
+## Decision actual
 
 - Vamos a trabajar con tres ramas largas en GitHub: `development`, `preview` y `main`.
-- `main` quedará reservada para `Production`.
-- `preview` será la rama estable de validación interna y QA en el ambiente `Preview` de Vercel.
-- `development` será la rama estable de integración continua y desplegará a un ambiente remoto dedicado en Vercel.
-- Para evitar confusión con el `Development` local nativo de Vercel, el ambiente remoto de la rama `development` se documenta aquí como `dev`.
+- `development` despliega a un custom environment remoto llamado `dev`.
+- `preview` despliega al ambiente nativo `Preview` de Vercel.
+- `main` queda reservada para `Production`.
+- No vamos a usar dominio propio por ahora.
+- Las URLs oficiales de ambientes remotos no productivos son aliases estables de `vercel.app`.
+
+## Mapa de ramas y ambientes
+
+| GitHub | Rol | Vercel | Estado |
+| --- | --- | --- | --- |
+| `feature/*` | Trabajo corto | `Preview` automatico | Activo |
+| `development` | Integracion remota del equipo | `dev` | Activo |
+| `preview` | QA / validacion interna | `Preview` | Pendiente de cerrar alias estable |
+| `main` | Produccion | `Production` | Pendiente |
+
+## Nota importante sobre `development`
+
+Vercel no permite usar `development` como slug de un custom environment remoto porque es un nombre reservado.
+
+Por eso:
+
+- rama GitHub: `development`
+- ambiente remoto Vercel: `dev`
+
+Ese mapeo es intencional y es el que debemos seguir.
 
 ## Proyectos Vercel
 
-- Team / Scope: `team_S1Dpa5HObAh9vyDNl6iEjejb`
+- Scope: `singular-projects-f4874352`
 - Frontend:
   - Proyecto: `singular-platform-web`
   - Project ID: `prj_6lda07SYG6QPlPWcETc6DJ7dW22S`
@@ -30,142 +45,64 @@ Por ahora el foco es dejar bien definida la operación de:
   - Project ID: `prj_FaCVipNv5o0JMJaOzMZELtwWOoTJ`
   - Root directory: `backend`
 
-## Modelo objetivo
+## Estado actual implementado
 
-| GitHub | Rol | Vercel | Tipo | Estado |
-| --- | --- | --- | --- | --- |
-| `feature/*` | Trabajo puntual | `Preview` automático | Efímero | Activo por convención |
-| `development` | Integración base del equipo | `dev` | Ambiente remoto estable | Fase 1 |
-| `preview` | Validación interna / QA | `Preview` | Ambiente remoto estable | Fase 1 |
-| `main` | Producción | `Production` | Ambiente oficial | Fase 2 |
+### GitHub
 
-## Decisión de diseño
+- Existen las ramas `development`, `preview` y `main`.
+- `qa` dejo de ser la rama operativa y fue reemplazada por `preview`.
+- El workflow `Typecheck` ya corre sobre `development`, `preview` y `main`.
 
-### 1. GitHub
+### Vercel: `development` remoto
 
-El flujo objetivo es:
+Para ambos proyectos:
 
-1. Crear cambios desde `development` hacia ramas `feature/*`.
-2. Abrir PR de `feature/*` hacia `development`.
-3. Cuando `development` esté validada, abrir PR de `development` hacia `preview`.
-4. Cuando `preview` esté aprobada, abrir PR de `preview` hacia `main`.
+- existe el custom environment `dev`
+- `dev` trackea la rama `development`
+- ya hay deploys activos del ambiente `dev`
 
-### 2. Vercel
+Aliases oficiales actuales:
 
-No vamos a usar `Development` de Vercel como ambiente remoto, porque ese ambiente existe para uso local (`vercel dev`, `vercel env pull`).
+- Frontend `dev`:
+  - `https://singular-platform-web-env-dev-singular-projects-f4874352.vercel.app`
+- Backend `dev`:
+  - `https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
 
-Para la rama `development`, la opción bien hecha es crear un ambiente remoto dedicado llamado `dev` y asociarlo a esa rama.
+### Vercel: `preview`
 
-Para la rama `preview`, vamos a usar el ambiente `Preview` nativo de Vercel, pero tratado operativamente como una rama larga y estable, con variables y dominio propios para esa rama.
+Por ahora:
 
-## Requisito de plan en Vercel
+- la rama `preview` existe en GitHub
+- el ambiente objetivo sigue siendo `Preview`
+- todavia falta cerrar su alias estable y revisar sus overrides especificos
 
-Este modelo asume que el equipo usa Vercel con soporte para `Custom Environments`.
+### Vercel: `production`
 
-Punto importante:
+Por ahora:
 
-- En `Pro`, Vercel permite `1 custom environment por proyecto`.
-- En `Enterprise`, permite más.
+- `main` queda reservada
+- no estamos cerrando aun el flujo oficial de `Production`
 
-Eso afecta nuestra implementación:
+## Politica de URLs
 
-- reservamos el único custom environment para `dev`
-- usamos `Preview` nativo para la rama `preview`
-- dejamos `Production` para más adelante sobre `main`
+Por decision actual del proyecto:
 
-Con esta decisión no necesitamos Enterprise para arrancar bien `development + preview`.
+- no usar dominio propio para ambientes remotos
+- no documentar subdominios custom como URLs oficiales
+- usar aliases estables de Vercel
 
-## Mapa operativo por ambiente
+### URLs oficiales hoy
 
-### Local
+#### Development
 
-- Uso: desarrollo en máquina local
-- Frontend: `http://localhost:3000`
-- Backend: `http://localhost:4000`
-- Fuente de variables: ambiente `Development` nativo de Vercel y/o `.env`
-- Rama recomendada para arrancar trabajo: `development`
+- Web:
+  - `https://singular-platform-web-env-dev-singular-projects-f4874352.vercel.app`
+- API:
+  - `https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
 
-### Dev remoto
+#### Preview
 
-- Rama GitHub: `development`
-- Ambiente Vercel: `dev` (custom environment)
-- Objetivo: integración remota permanente del equipo
-- Duración: larga
-- URL: alias o dominio estable por definir
-- Variables: propias de `dev`
-
-### Preview estable
-
-- Rama GitHub: `preview`
-- Ambiente Vercel: `Preview`
-- Objetivo: validación funcional, QA y revisión con stakeholders
-- Duración: larga
-- URL: alias o dominio estable asignado a la rama `preview`
-- Variables: `Preview` con overrides específicos para la rama `preview`
-
-### Production
-
-- Rama GitHub: `main`
-- Ambiente Vercel: `Production`
-- Objetivo: salida oficial
-- Estado: diferido
-
-## Plan de implementación
-
-### Fase 1: GitHub + dev + preview
-
-#### GitHub
-
-1. Mantener tres ramas largas:
-   - `development`
-   - `preview`
-   - `main`
-2. Dejar de usar `qa` como rama principal de validación.
-3. Crear reglas de protección:
-   - `development`: sin push directo idealmente, PR obligatorio
-   - `preview`: sin push directo, merge solo desde `development`
-   - `main`: sin push directo, merge solo desde `preview`
-4. Exigir checks mínimos antes de merge:
-   - workflow `Typecheck` en GitHub Actions
-5. Definir convención de ramas cortas:
-   - `feature/*`
-   - `fix/*`
-   - `chore/*`
-
-#### Vercel: ambiente `dev`
-
-Para cada proyecto (`web` y `api`):
-
-1. Crear custom environment `dev`.
-2. Configurar branch tracking para la rama `development`.
-3. Definir variables propias de `dev`.
-4. Asignar alias o dominio estable para ese ambiente.
-5. Verificar que cada push a `development` actualice ese ambiente remoto.
-
-#### Vercel: ambiente `Preview`
-
-Para cada proyecto (`web` y `api`):
-
-1. Mantener `Preview` nativo de Vercel.
-2. Definir a la rama `preview` como la rama estable de QA.
-3. Configurar variables `Preview` específicas para la rama `preview` cuando deban diferir del resto de previews.
-4. Asignar alias o dominio estable a la rama `preview`.
-5. Verificar que cada push a `preview` actualice siempre esa URL estable.
-
-### Fase 2: Production
-
-1. Confirmar que `main` será la `Production Branch` de ambos proyectos.
-2. Crear variables de `Production`.
-3. Asignar dominio oficial.
-4. Habilitar promoción a producción solo desde `preview`.
-
-## Reglas operativas recomendadas
-
-- No abrir PR directo de `feature/*` a `preview`.
-- No abrir PR directo de `feature/*` a `main`.
-- `preview` no se usa para desarrollo diario; se usa para validar una integración ya consolidada.
-- `main` no se usa para probar; se usa para publicar.
-- Si una variable cambia solo para QA, debe vivir en `Preview` rama `preview`, no en todas las ramas preview.
+- Pendiente de definir cuando cerremos la configuracion de la rama `preview`
 
 ## Variables importantes
 
@@ -173,6 +110,7 @@ Para cada proyecto (`web` y `api`):
 
 - `SESSION_SECRET`
 - `BACKEND_BASE_URL`
+- `BACKEND_PROTECTION_BYPASS_SECRET`
 
 ### Backend
 
@@ -186,88 +124,123 @@ Para cada proyecto (`web` y `api`):
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `FRONTEND_URL`
+- `AIRTABLE_BASE_ID_FOR_COACHING`
+- `AIRTABLE_TABLE_NAME_FOR_COACHING_LOGS`
+- `AIRTABLE_MONTHLY_TRUSTWORTHYNESS_FIELD`
 
-## Matriz de variables por fase
+## Matriz de variables por ambiente
 
 ### Local
 
-- Usar `.env` o `vercel env pull`
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:4000`
 - `FRONTEND_URL=http://localhost:3000`
 - `BACKEND_BASE_URL=http://localhost:4000`
 
 ### Dev remoto
 
-- `FRONTEND_URL` debe apuntar al frontend `dev`
-- `BACKEND_BASE_URL` debe apuntar al backend `dev`
-- resto de secretos aislados para `dev`
+- `FRONTEND_URL=https://singular-platform-web-env-dev-singular-projects-f4874352.vercel.app`
+- `BACKEND_BASE_URL=https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
+- `BACKEND_PROTECTION_BYPASS_SECRET` vive en el frontend `dev`
+- el backend mantiene su propio Protection Bypass for Automation
 
-### Preview estable
+### Preview
 
-- `FRONTEND_URL` debe apuntar al frontend `preview`
-- `BACKEND_BASE_URL` debe apuntar al backend `preview`
-- si una variable de `Preview` cambia solo para la rama `preview`, se configura por branch
+- Se definira al cerrar el carril `preview`
+- si alguna variable cambia solo para la rama `preview`, se configura con override especifico de esa rama
 
-## Checklist de configuración
+## Regla operativa sobre Deployment Protection
+
+Frontend y backend viven en proyectos Vercel separados.
+
+Cuando ambos ambientes remotos estan protegidos por Vercel Authentication:
+
+- el login del navegador protege el acceso del usuario al frontend
+- pero eso no resuelve automaticamente los fetch server-to-server del frontend hacia el backend
+
+Para ese caso, el frontend debe enviar el header oficial de Vercel:
+
+- `x-vercel-protection-bypass`
+
+Y el secret debe venir de:
+
+- `BACKEND_PROTECTION_BYPASS_SECRET`
+
+Esto ya quedo implementado para `development`.
+
+## Flujo operativo recomendado
+
+1. Crear cambios desde `development` hacia ramas `feature/*`, `fix/*` o `chore/*`.
+2. Abrir PR hacia `development`.
+3. Cuando `development` este estable, abrir PR de `development` hacia `preview`.
+4. Cuando `preview` este aprobada, abrir PR de `preview` hacia `main`.
+
+## Reglas del equipo
+
+- No abrir PR directo de `feature/*` a `preview`.
+- No abrir PR directo de `feature/*` a `main`.
+- `development` es el carril remoto principal de integracion.
+- `preview` se usa para QA y validacion, no para desarrollo diario.
+- `main` se usa para publicar, no para probar.
+
+## Checklist actual
 
 ### GitHub
 
-- [ ] Existen las ramas `development`, `preview` y `main`
-- [ ] `qa` deja de ser la rama operativa principal
-- [ ] Existe workflow de GitHub Actions para `Typecheck`
+- [x] Existen las ramas `development`, `preview` y `main`
+- [x] `qa` deja de ser la rama operativa principal
+- [x] Existe workflow de GitHub Actions para `Typecheck`
 - [ ] `development` tiene branch protection
 - [ ] `preview` tiene branch protection
 - [ ] `main` tiene branch protection
 
 ### Vercel web
 
-- [ ] Existe custom environment `dev`
-- [ ] `dev` trackea `development`
-- [ ] `Preview` tiene configuración estable para la rama `preview`
-- [ ] Están cargadas las variables correctas en `dev`
-- [ ] Están cargadas las variables correctas en `preview`
+- [x] Existe custom environment `dev`
+- [x] `dev` trackea `development`
+- [x] Existe alias estable de Vercel para `development`
+- [x] Estan cargadas las variables correctas en `dev`
+- [x] El frontend `dev` habla con el backend `dev`
+- [ ] Alias estable final para `preview`
+- [ ] Overrides finales de `preview`
 
 ### Vercel api
 
-- [ ] Existe custom environment `dev`
-- [ ] `dev` trackea `development`
-- [ ] `Preview` tiene configuración estable para la rama `preview`
-- [ ] Están cargadas las variables correctas en `dev`
-- [ ] Están cargadas las variables correctas en `preview`
-
-## Nota sobre URLs
-
-Hoy Vercel genera URLs automáticas por branch y por commit. Para el modelo estable que queremos, debemos dejar definidos alias o dominios permanentes al menos para:
-
-- `dev` web
-- `dev` api
-- `preview` web
-- `preview` api
-
-Hasta que eso quede configurado, no conviene documentar URLs fijas aquí como definitivas.
+- [x] Existe custom environment `dev`
+- [x] `dev` trackea `development`
+- [x] Existe alias estable de Vercel para `development`
+- [x] Estan cargadas las variables correctas en `dev`
+- [x] El backend `dev` responde correctamente al flujo remoto
+- [ ] Alias estable final para `preview`
+- [ ] Overrides finales de `preview`
 
 ## Problemas comunes
 
-### El frontend dice "El backend no devolvió JSON"
+### El frontend dice "El backend no devolvio JSON"
 
 Revisar en este orden:
 
-1. Que `BACKEND_BASE_URL` apunte al backend correcto del ambiente actual.
-2. Que frontend y backend pertenezcan al mismo carril (`dev` con `dev`, `preview` con `preview`).
-3. Que el backend no esté protegido por Vercel Authentication si el frontend necesita consumirlo.
-4. Que el backend tenga desplegados los endpoints nuevos.
-5. Que `AIRTABLE_TRUSTWORTHINESS_TABLE_NAME` exista en el ambiente correcto.
+1. Que `BACKEND_BASE_URL` apunte al backend del mismo carril.
+2. Que frontend y backend pertenezcan al mismo ambiente remoto.
+3. Que el backend no este respondiendo HTML de Deployment Protection.
+4. Que el frontend este enviando `x-vercel-protection-bypass` cuando corresponde.
+5. Que el backend tenga desplegados los endpoints y variables correctas.
+
+### El alias existe pero responde `401 Authentication Required`
+
+Eso significa que el ambiente esta desplegado, pero sigue protegido por Vercel Authentication.
+
+Opciones:
+
+- usar login de Vercel para acceder
+- crear una excepcion de protection si se decide exponer esa URL
+- usar bypass de automatizacion para llamadas server-to-server
 
 ### Cuidado al guardar env vars con CLI
 
-Si agregas variables con `vercel env add`, evita meter salto de línea al final del valor.
+Si agregas variables con `vercel env add`, evita meter salto de linea al final del valor.
 
 Correcto:
-
-```bash
-printf %s 'valor' | vercel env add NOMBRE preview preview --force
-```
-
-También es válido para custom environments como `dev`:
 
 ```bash
 printf %s 'valor' | vercel env add NOMBRE dev --force
@@ -276,7 +249,7 @@ printf %s 'valor' | vercel env add NOMBRE dev --force
 Evitar:
 
 ```bash
-printf '%s\n' 'valor' | vercel env add NOMBRE preview preview --force
+printf '%s\n' 'valor' | vercel env add NOMBRE dev --force
 ```
 
-Ese salto de línea puede romper URLs, nombres de tabla y otros valores sensibles.
+Ese salto de linea puede romper URLs, nombres de tabla y otros valores sensibles.

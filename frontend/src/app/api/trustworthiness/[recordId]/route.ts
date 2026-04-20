@@ -8,6 +8,26 @@ type RouteContext = {
   }>;
 };
 
+function getUpdateErrorStatus(message: string) {
+  if (message === "No autorizado para editar esta evaluación.") {
+    return 403;
+  }
+
+  if (message === "Solo se pueden editar evaluaciones con status Pending.") {
+    return 409;
+  }
+
+  if (message === "No se encontró la evaluación solicitada.") {
+    return 404;
+  }
+
+  if (message.includes("obligatorio") || message.includes("debe")) {
+    return 400;
+  }
+
+  return 502;
+}
+
 export async function PATCH(request: Request, context: RouteContext) {
   const session = await readSession();
 
@@ -73,6 +93,6 @@ export async function PATCH(request: Request, context: RouteContext) {
         ? error.message
         : "No fue posible actualizar la evaluación.";
 
-    return NextResponse.json({ message }, { status: 502 });
+    return NextResponse.json({ message }, { status: getUpdateErrorStatus(message) });
   }
 }

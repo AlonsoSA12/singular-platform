@@ -60,5 +60,14 @@ Guia de deployments y ambientes:
 Estrategia objetivo de ramas y ambientes:
 
 - `development` -> ambiente remoto `dev`
+- alias oficial actual web:
+  - `https://singular-platform-web-env-dev-singular-projects-f4874352.vercel.app`
+- alias oficial actual api:
+  - `https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
 - `preview` -> ambiente `Preview` estable para QA
 - `main` -> `Production` cuando se habilite ese flujo
+
+Decision actual:
+
+- no usamos dominio propio para ambientes remotos
+- usamos aliases estables de Vercel

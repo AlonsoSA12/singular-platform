@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchFromBackend } from "@/lib/backend";
 import { getBackendBaseUrl } from "@/lib/env";
 import { readSession } from "@/lib/session";
 
@@ -48,7 +49,7 @@ export async function POST(request: Request, context: RouteContext) {
     url.searchParams.set("activeEmail", session.email);
     url.searchParams.set("evaluatorEmail", session.email);
 
-    const backendResponse = await fetch(url, {
+    const backendResponse = await fetchFromBackend(url, {
       body: JSON.stringify({
         end,
         participantEmail,

@@ -11,6 +11,42 @@
     {
       "source": "/trustworthiness",
       "destination": "/api/trustworthiness"
+    },
+    {
+      "source": "/trustworthiness/coaching-context/:recordId/transcript",
+      "destination": "/api/trustworthiness/coaching-context/:recordId/transcript"
+    },
+    {
+      "source": "/trustworthiness/coaching-context",
+      "destination": "/api/trustworthiness/coaching-context"
+    },
+    {
+      "source": "/trustworthiness/:recordId/assistant/session",
+      "destination": "/api/trustworthiness/:recordId/assistant/session"
+    },
+    {
+      "source": "/trustworthiness/:recordId/assistant/message",
+      "destination": "/api/trustworthiness/:recordId/assistant/message"
+    },
+    {
+      "source": "/trustworthiness/:recordId/assistant/save",
+      "destination": "/api/trustworthiness/:recordId/assistant/save"
+    },
+    {
+      "source": "/trustworthiness/:recordId/suggestion/stream",
+      "destination": "/api/trustworthiness/:recordId/suggestion/stream"
+    },
+    {
+      "source": "/trustworthiness/:recordId/suggestion",
+      "destination": "/api/trustworthiness/:recordId/suggestion"
+    },
+    {
+      "source": "/trustworthiness/:recordId/feedback-suggestion",
+      "destination": "/api/trustworthiness/:recordId/feedback-suggestion"
+    },
+    {
+      "source": "/trustworthiness/:recordId",
+      "destination": "/api/trustworthiness/:recordId"
     }
   ]
 }
