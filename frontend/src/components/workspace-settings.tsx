@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { LogoutButton } from "@/components/logout-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getAppRoleOption } from "@/lib/roles";
 
 type WorkspaceSettingsProps = {
   userInitial: string;
@@ -18,6 +19,7 @@ export function WorkspaceSettings({
   variant = "sidebar"
 }: WorkspaceSettingsProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
+  const activeRole = getAppRoleOption(userRole);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -60,10 +62,15 @@ export function WorkspaceSettings({
   return (
     <details className={detailsClassName} ref={detailsRef}>
       <summary className={triggerClassName}>
+        <span
+          aria-label={`Rol activo: ${activeRole.label}`}
+          className="user-role-indicator"
+          style={{ "--user-role-color": activeRole.color } as CSSProperties}
+        />
         <div className={avatarClassName}>{userInitial}</div>
         <div className={copyClassName}>
           <p className="user-name">{userLabel}</p>
-          <p className="user-email">{userRole}</p>
+          <p className="user-email">{activeRole.label}</p>
         </div>
         <span aria-hidden="true" className="user-menu-chevron">
           ⌄
@@ -74,12 +81,17 @@ export function WorkspaceSettings({
         {!isHeaderVariant ? (
           <div className="user-menu-modal-header">
             <div className="user-menu-modal-identity">
+              <span
+                aria-label={`Rol activo: ${activeRole.label}`}
+                className="user-role-indicator is-compact"
+                style={{ "--user-role-color": activeRole.color } as CSSProperties}
+              />
               <span aria-hidden="true" className="user-menu-modal-avatar">
                 {userInitial}
               </span>
               <div className="user-menu-modal-copy">
                 <strong>{userLabel}</strong>
-                <span>{userRole}</span>
+                <span>{activeRole.label}</span>
               </div>
             </div>
           </div>

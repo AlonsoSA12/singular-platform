@@ -57,6 +57,7 @@ type UpdateTrustworthinessPayload = {
   groupThinkingAiJson?: string | null;
   intimacyPoints?: number | null;
   intimacyAiJson?: string | null;
+  ratingStatus?: "Pending" | "Done";
   reliabilityPoints?: number | null;
   reliabilityAiJson?: string | null;
 };
@@ -101,6 +102,66 @@ type FeedbackSuggestionPayload = {
   >;
   projectContext?: string | null;
   roleLabel?: string | null;
+};
+
+type TrustworthinessAssistantProposalPayload = {
+  credibilityPoints: number;
+  feedback: string;
+  groupThinkingPoints: number;
+  intimacyPoints: number;
+  reliabilityPoints: number;
+};
+
+type TrustworthinessAssistantMeetingPayload = {
+  actionItems: string[];
+  coachingAnalysis: string | null;
+  coachingSummary: string | null;
+  meetingDatetime: string | null;
+  meetingId: string;
+  metricsScores: Record<string, number | null>;
+  title: string;
+  topics: string[];
+  transcriptSummary: string | null;
+};
+
+type TrustworthinessAssistantSessionPayload = {
+  end: string;
+  evaluatedName: string;
+  existingFeedback?: string | null;
+  participantEmail: string;
+  projectContext?: string | null;
+  roleLabel?: string | null;
+  start: string;
+};
+
+type TrustworthinessAssistantMessagePayload = {
+  evaluatedName: string;
+  history: Array<{
+    content: string;
+    role: "assistant" | "user";
+  }>;
+  meetings: TrustworthinessAssistantMeetingPayload[];
+  projectContext?: string | null;
+  prompt: string;
+  proposal: TrustworthinessAssistantProposalPayload;
+  roleLabel?: string | null;
+  suggestion: Record<string, unknown>;
+};
+
+type TrustworthinessAssistantSavePayload = {
+  agentId: string;
+  agentVersion: string;
+  confirmedByUser: boolean;
+  context: {
+    end: string;
+    meetingsCount: number;
+    participantEmail: string;
+    recordId: string;
+    start: string;
+  };
+  proposal: TrustworthinessAssistantProposalPayload;
+  ratingStatus: "Pending" | "Done";
+  twSuggestion: Record<string, unknown>;
 };
 
 export async function fetchTrustworthinessFromBackend(
@@ -326,4 +387,125 @@ export async function generateTrustworthinessFeedbackInBackend(
   }
 
   return parsedPayload.feedback;
+}
+
+export async function startTrustworthinessAssistantSessionInBackend(
+  recordId: string,
+  evaluatorEmail: string,
+  activeSessionEmail: string,
+  payload: TrustworthinessAssistantSessionPayload
+) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const url = new URL(
+    `${backendBaseUrl}/trustworthiness/${encodeURIComponent(recordId)}/assistant/session`
+  );
+
+  url.searchParams.set("activeEmail", activeSessionEmail);
+  url.searchParams.set("evaluatorEmail", evaluatorEmail);
+
+  const response = await fetch(url, {
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "El backend no devolvio JSON. Revisa BACKEND_BASE_URL o la proteccion del deployment."
+    );
+  }
+
+  const parsedPayload = (await response.json()) as Record<string, unknown> | TrustworthinessFailure;
+
+  if (!response.ok || !("ok" in parsedPayload && parsedPayload.ok)) {
+    const message =
+      "message" in parsedPayload && typeof parsedPayload.message === "string"
+        ? parsedPayload.message
+        : undefined;
+    throw new Error(message ?? "No fue posible preparar el asistente de TW.");
+  }
+
+  return parsedPayload;
+}
+
+export async function sendTrustworthinessAssistantMessageToBackend(
+  recordId: string,
+  payload: TrustworthinessAssistantMessagePayload
+) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const url = new URL(
+    `${backendBaseUrl}/trustworthiness/${encodeURIComponent(recordId)}/assistant/message`
+  );
+
+  const response = await fetch(url, {
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "El backend no devolvio JSON. Revisa BACKEND_BASE_URL o la proteccion del deployment."
+    );
+  }
+
+  const parsedPayload = (await response.json()) as Record<string, unknown> | TrustworthinessFailure;
+
+  if (!response.ok || !("ok" in parsedPayload && parsedPayload.ok)) {
+    const message =
+      "message" in parsedPayload && typeof parsedPayload.message === "string"
+        ? parsedPayload.message
+        : undefined;
+    throw new Error(message ?? "No fue posible continuar la conversación del asistente.");
+  }
+
+  return parsedPayload;
+}
+
+export async function saveTrustworthinessAssistantProposalInBackend(
+  recordId: string,
+  evaluatorEmail: string,
+  payload: TrustworthinessAssistantSavePayload
+) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const url = new URL(
+    `${backendBaseUrl}/trustworthiness/${encodeURIComponent(recordId)}/assistant/save`
+  );
+
+  url.searchParams.set("evaluatorEmail", evaluatorEmail);
+
+  const response = await fetch(url, {
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "El backend no devolvio JSON. Revisa BACKEND_BASE_URL o la proteccion del deployment."
+    );
+  }
+
+  const parsedPayload = (await response.json()) as
+    | { ok: true; record: TrustworthinessRecord }
+    | TrustworthinessFailure;
+
+  if (!response.ok || !parsedPayload.ok) {
+    const message = "message" in parsedPayload ? parsedPayload.message : undefined;
+    throw new Error(message ?? "No fue posible guardar la propuesta del asistente.");
+  }
+
+  return parsedPayload;
 }

@@ -585,11 +585,16 @@ button {
 .workspace-topbar-info-button {
   position: relative;
   cursor: pointer;
+  list-style: none;
   transition:
     transform 120ms ease,
     border-color 120ms ease,
     background 120ms ease,
     color 120ms ease;
+}
+
+.workspace-topbar-info-button::-webkit-details-marker {
+  display: none;
 }
 
 .workspace-topbar-info-button::before,
@@ -647,28 +652,88 @@ button {
   transform: translateX(-50%) translateY(0);
 }
 
-.workspace-topbar-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0.5rem 0.85rem;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-muted) 70%, transparent);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
+.workspace-topbar-walkthrough-menu {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 14;
 }
 
-.workspace-topbar-pill-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-soft) 70%, transparent);
+.workspace-topbar-walkthrough-menu[open] .workspace-topbar-info-button {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface-muted));
+  color: var(--accent-strong);
+}
+
+.workspace-topbar-walkthrough-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  display: grid;
+  gap: 0.28rem;
+  width: min(320px, calc(100vw - 2rem));
+  padding: 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-overlay) 96%, var(--surface-strong));
+  box-shadow:
+    0 22px 42px rgba(5, 10, 24, 0.3),
+    0 2px 0 color-mix(in srgb, var(--border) 68%, transparent) inset;
+  z-index: 20;
+}
+
+.workspace-topbar-walkthrough-option {
+  display: grid;
+  gap: 0.24rem;
+  width: 100%;
+  padding: 0.7rem 0.78rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.workspace-topbar-walkthrough-option strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.workspace-topbar-walkthrough-option span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.workspace-topbar-walkthrough-option:hover,
+.workspace-topbar-walkthrough-option:focus-visible {
+  background: color-mix(in srgb, var(--surface-muted) 86%, transparent);
+  outline: none;
+}
+
+.workspace-topbar-toast {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 0.8rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-overlay) 98%, white 2%), color-mix(in srgb, var(--surface-strong) 98%, transparent)),
+    color-mix(in srgb, var(--surface-overlay) 96%, transparent);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow:
+    0 20px 44px rgba(5, 10, 24, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(18px) saturate(1.06);
+  z-index: 95;
 }
 
 .workspace-shell-main > .workspace-main {
@@ -733,6 +798,15 @@ button {
     0 24px 70px rgba(5, 10, 24, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.workspace-walkthrough-panel.is-top {
+  top: max(24px, env(safe-area-inset-top));
+  bottom: auto;
+}
+
+.workspace-walkthrough-panel.is-bottom {
+  top: auto;
 }
 
 .workspace-walkthrough-panel-head {
@@ -923,7 +997,7 @@ button {
 
 .user-card {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 12px 34px minmax(0, 1fr) auto;
   gap: 0.6rem;
   padding: 0.62rem 0.7rem;
   border-radius: var(--radius-control);
@@ -978,7 +1052,7 @@ button {
 
 .workspace-profile {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 12px 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.6rem;
   min-width: 0;
@@ -1036,6 +1110,84 @@ button {
 
 .workspace-profile-copy .user-email {
   max-width: 14ch;
+}
+
+.user-role-indicator {
+  --user-role-color: #7f87aa;
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--user-role-color) 44%, white 18%);
+  background:
+    radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.96) 0 14%, transparent 15%),
+    radial-gradient(
+      circle at 34% 32%,
+      color-mix(in srgb, white 82%, var(--user-role-color) 18%) 0,
+      color-mix(in srgb, white 58%, var(--user-role-color) 42%) 22%,
+      color-mix(in srgb, var(--user-role-color) 92%, white 8%) 58%,
+      color-mix(in srgb, var(--user-role-color) 74%, black 26%) 100%
+    );
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--user-role-color) 14%, transparent),
+    0 4px 10px rgba(7, 10, 18, 0.14),
+    inset 0 1px 1px rgba(255, 255, 255, 0.34);
+}
+
+.user-role-indicator.is-compact {
+  width: 11px;
+  height: 11px;
+}
+
+.user-role-indicator::before,
+.user-role-indicator::after {
+  position: absolute;
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.user-role-indicator::before {
+  content: "";
+  top: calc(100% + 2px);
+  transform: translateX(-50%) translateY(-4px);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 5px solid color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+}
+
+.user-role-indicator::after {
+  content: attr(data-tooltip);
+  top: calc(100% + 7px);
+  transform: translateX(-50%) translateY(-4px);
+  min-width: max-content;
+  max-width: 220px;
+  padding: 0.36rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  white-space: nowrap;
+  z-index: 6;
+}
+
+.workspace-profile-trigger:hover .user-role-indicator::before,
+.workspace-profile-trigger:hover .user-role-indicator::after,
+.workspace-profile-trigger:focus-visible .user-role-indicator::before,
+.workspace-profile-trigger:focus-visible .user-role-indicator::after,
+.user-menu-modal-identity:hover .user-role-indicator::before,
+.user-menu-modal-identity:hover .user-role-indicator::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .workspace-profile-menu {
@@ -1151,7 +1303,7 @@ button {
 
 .user-menu-modal-identity {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: 10px 30px minmax(0, 1fr);
   align-items: center;
   gap: 0.55rem;
 }
@@ -1952,7 +2104,8 @@ button {
   animation: trustworthiness-drawer-in 180ms ease forwards;
 }
 
-.trustworthiness-detail-resize-handle {
+.trustworthiness-detail-resize-handle,
+.chat-review-side-sheet-resize-handle {
   position: absolute;
   top: 0;
   left: -14px;
@@ -1965,7 +2118,8 @@ button {
   z-index: 1;
 }
 
-.trustworthiness-detail-resize-handle::before {
+.trustworthiness-detail-resize-handle::before,
+.chat-review-side-sheet-resize-handle::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -1977,7 +2131,8 @@ button {
   transform: translateY(-50%);
 }
 
-.trustworthiness-detail-resize-handle::after {
+.trustworthiness-detail-resize-handle::after,
+.chat-review-side-sheet-resize-handle::after {
   content: "||";
   position: absolute;
   top: 50%;
@@ -1999,11 +2154,13 @@ button {
   box-shadow: var(--shadow);
 }
 
-.trustworthiness-detail-resize-handle:hover::before {
+.trustworthiness-detail-resize-handle:hover::before,
+.chat-review-side-sheet-resize-handle:hover::before {
   background: color-mix(in srgb, var(--accent) 40%, var(--text-muted));
 }
 
-.trustworthiness-detail-resize-handle:hover::after {
+.trustworthiness-detail-resize-handle:hover::after,
+.chat-review-side-sheet-resize-handle:hover::after {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
   color: var(--accent-strong);
 }
@@ -2235,6 +2392,105 @@ button {
   font-size: var(--type-body);
   font-weight: 600;
   line-height: 1.4;
+}
+
+.trustworthiness-detail-meta-status {
+  align-content: start;
+}
+
+.trustworthiness-detail-status-control {
+  display: block;
+}
+
+.trustworthiness-detail-status-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 42px 0 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, transparent), color-mix(in srgb, var(--surface-soft) 92%, transparent)),
+    var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, color-mix(in srgb, var(--text-muted) 88%, white) 50%),
+    linear-gradient(135deg, color-mix(in srgb, var(--text-muted) 88%, white) 50%, transparent 50%);
+  background-position:
+    calc(100% - 19px) calc(50% - 2px),
+    calc(100% - 13px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.trustworthiness-detail-status-select:hover:not(:disabled),
+.trustworthiness-detail-status-select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  outline: none;
+}
+
+.trustworthiness-detail-status-select:disabled {
+  opacity: 0.78;
+  cursor: wait;
+}
+
+.trustworthiness-detail-status-hint,
+.trustworthiness-detail-status-error {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.trustworthiness-detail-status-hint {
+  color: var(--text-muted);
+}
+
+.trustworthiness-detail-status-error {
+  color: var(--danger);
+}
+
+.trustworthiness-detail-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-soft) 22%, transparent), transparent 44%),
+    color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.trustworthiness-detail-save-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.trustworthiness-detail-save-copy strong {
+  color: var(--text);
+  font-size: var(--type-body);
+}
+
+.trustworthiness-detail-save-copy p,
+.trustworthiness-detail-save-error {
+  margin: 0;
+  font-size: var(--type-body-small);
+  line-height: 1.45;
+}
+
+.trustworthiness-detail-save-copy p {
+  color: var(--text-muted);
+}
+
+.trustworthiness-detail-save-error {
+  color: var(--danger);
 }
 
 .tw-generation-status-card {
@@ -2635,8 +2891,9 @@ button {
   content: attr(data-tooltip);
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 50%;
+  left: 0;
   min-width: max-content;
+  max-width: min(280px, calc(100vw - 2rem));
   padding: 0.35rem 0.5rem;
   border-radius: var(--radius-soft);
   border: 1px solid var(--border);
@@ -2644,20 +2901,21 @@ button {
   color: var(--text);
   font-size: var(--type-body-small);
   line-height: 1.3;
-  white-space: nowrap;
+  white-space: normal;
   opacity: 0;
   pointer-events: none;
-  transform: translateX(-50%) translateY(4px);
+  transform: translateY(4px);
   transition:
     opacity 120ms ease,
     transform 120ms ease;
   box-shadow: var(--shadow);
+  z-index: 6;
 }
 
 .trustworthiness-index-action:hover::after,
 .trustworthiness-index-action:focus-visible::after {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
 }
 
 .trustworthiness-photo-cell {
@@ -3764,23 +4022,26 @@ button {
 .trustworthiness-chatbot-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 12;
+  z-index: 24;
   display: grid;
   place-items: center;
-  padding: 1.25rem;
-  background: rgba(9, 10, 14, 0.58);
-  backdrop-filter: blur(8px);
+  padding: 1.5rem;
+  background: rgba(8, 9, 14, 0.76);
+  backdrop-filter: blur(12px);
 }
 
 .trustworthiness-chatbot-modal {
   display: grid;
-  gap: 16px;
-  width: min(100%, 840px);
-  max-height: min(84vh, 820px);
-  padding: 1.15rem;
-  border-radius: var(--radius-shell);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  width: min(100%, 920px);
+  max-height: min(88vh, 860px);
+  padding: 1.25rem;
+  border-radius: calc(var(--radius-shell) + 6px);
   border: 1px solid var(--border);
-  background: var(--surface-overlay);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-overlay) 94%, transparent), var(--surface-overlay)),
+    radial-gradient(circle at top left, rgba(120, 136, 255, 0.12), transparent 38%);
   -webkit-backdrop-filter: blur(20px) saturate(1.12);
   backdrop-filter: blur(20px) saturate(1.12);
   box-shadow: var(--shadow);
@@ -3788,21 +4049,329 @@ button {
 
 .trustworthiness-chatbot-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
 .trustworthiness-chatbot-header-copy {
+  flex: 1 1 auto;
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.trustworthiness-chatbot-header-actions {
+.trustworthiness-chatbot-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trustworthiness-chatbot-header-meta-inline {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trustworthiness-chatbot-walkthrough-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0.22rem 0.56rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 18%, var(--surface));
+  color: color-mix(in srgb, var(--text) 92%, white 8%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-status-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 24px;
+  padding: 0.22rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 20%, var(--surface-muted));
+  color: var(--text);
+  font-size: var(--type-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-period-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0.16rem 0.1rem 0.16rem 0;
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.trustworthiness-chatbot-header-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.trustworthiness-chatbot-inline-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.trustworthiness-chatbot-inline-info::before,
+.trustworthiness-chatbot-inline-info::after {
+  position: absolute;
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.trustworthiness-chatbot-inline-info::before {
+  content: "";
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%) translateY(4px);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+}
+
+.trustworthiness-chatbot-inline-info::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 7px);
+  transform: translateX(-50%) translateY(4px);
+  min-width: max-content;
+  max-width: 280px;
+  padding: 0.42rem 0.56rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  white-space: nowrap;
+  z-index: 5;
+}
+
+.trustworthiness-chatbot-inline-info svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.trustworthiness-chatbot-inline-info:hover,
+.trustworthiness-chatbot-inline-info:focus-visible {
+  color: var(--text);
+}
+
+.trustworthiness-chatbot-inline-info[data-tooltip]:hover::before,
+.trustworthiness-chatbot-inline-info[data-tooltip]:hover::after,
+.trustworthiness-chatbot-inline-info[data-tooltip]:focus-visible::before,
+.trustworthiness-chatbot-inline-info[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.trustworthiness-chatbot-conversation {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 0;
+}
+
+.trustworthiness-chatbot-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-muted) 92%, transparent);
+  color: var(--text-muted);
+}
+
+.trustworthiness-chatbot-icon::before,
+.trustworthiness-chatbot-icon::after {
+  position: absolute;
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.trustworthiness-chatbot-icon::before {
+  content: "";
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%) translateY(4px);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+}
+
+.trustworthiness-chatbot-icon::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 7px);
+  transform: translateX(-50%) translateY(4px);
+  min-width: max-content;
+  max-width: 280px;
+  padding: 0.42rem 0.56rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  white-space: nowrap;
+  z-index: 5;
+}
+
+.trustworthiness-chatbot-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.trustworthiness-chatbot-icon:hover,
+.trustworthiness-chatbot-icon:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 62%, var(--surface-muted));
+}
+
+.trustworthiness-chatbot-icon.is-primary-action {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 34%, var(--surface-muted));
+  color: var(--text);
+}
+
+.trustworthiness-chatbot-icon.is-primary-action:hover,
+.trustworthiness-chatbot-icon.is-primary-action:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 50%, var(--surface-muted));
+}
+
+.trustworthiness-chatbot-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trustworthiness-chatbot-icon[data-tooltip]:hover::before,
+.trustworthiness-chatbot-icon[data-tooltip]:hover::after,
+.trustworthiness-chatbot-icon[data-tooltip]:focus-visible::before,
+.trustworthiness-chatbot-icon[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.trustworthiness-chatbot-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.trustworthiness-chatbot-thread-panel,
+.trustworthiness-chatbot-side-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+
+.trustworthiness-chatbot-thread-panel {
+  align-content: start;
+}
+
+.trustworthiness-chatbot-side-panel {
+  align-content: start;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.trustworthiness-chatbot-thread-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trustworthiness-chatbot-meta-chip,
+.trustworthiness-chatbot-side-card {
+  display: grid;
+  gap: 6px;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+}
+
+.trustworthiness-chatbot-meta-chip {
+  min-width: 190px;
+  flex: 1 1 0;
+}
+
+.trustworthiness-chatbot-meta-chip span,
+.trustworthiness-chatbot-side-card span {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-meta-chip strong,
+.trustworthiness-chatbot-side-card strong {
+  font-size: var(--type-body);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.trustworthiness-chatbot-side-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body);
+  line-height: 1.5;
+}
+
+.trustworthiness-chatbot-side-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
 }
 
 .trustworthiness-chatbot-header span,
@@ -3824,9 +4393,26 @@ button {
   line-height: 1.2;
 }
 
+.trustworthiness-chatbot-proposal-head h5 {
+  margin: 0.1rem 0 0;
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.trustworthiness-chatbot-proposal-head h5 small {
+  display: inline-block;
+  margin-left: 0.45rem;
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  font-weight: 600;
+}
+
 .trustworthiness-chatbot-header p,
 .trustworthiness-chatbot-message p,
-.trustworthiness-chatbot-actions small {
+.trustworthiness-chatbot-pillar-card p,
+.trustworthiness-chatbot-feedback-card p,
+.trustworthiness-chatbot-empty-state p {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--type-body);
@@ -3835,8 +4421,7 @@ button {
 }
 
 .trustworthiness-chatbot-close,
-.trustworthiness-chatbot-secondary,
-.trustworthiness-chatbot-send {
+.trustworthiness-chatbot-secondary {
   min-height: 36px;
   padding: 0.5rem 0.8rem;
   border-radius: var(--radius-control);
@@ -3855,10 +4440,9 @@ button {
   color: var(--text);
 }
 
-.trustworthiness-chatbot-send {
-  background: color-mix(in srgb, var(--accent-soft) 82%, var(--surface-muted));
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  color: var(--text);
+.trustworthiness-chatbot-suggestion:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .trustworthiness-chatbot-context-grid {
@@ -3869,13 +4453,107 @@ button {
 
 .trustworthiness-chatbot-context,
 .trustworthiness-chatbot-message,
-.trustworthiness-chatbot-composer {
+.trustworthiness-chatbot-composer,
+.trustworthiness-chatbot-proposal {
   display: grid;
   gap: 8px;
   padding: 0.95rem;
   border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+}
+
+.trustworthiness-chatbot-proposal {
+  gap: 14px;
+}
+
+.trustworthiness-chatbot-proposal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.trustworthiness-chatbot-proposal-status {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.42rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  font-weight: 600;
+}
+
+.trustworthiness-chatbot-proposal-status.is-saved {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 28%, var(--surface));
+  color: var(--text);
+}
+
+.trustworthiness-chatbot-proposal-status.is-ready {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--surface));
+  color: var(--text);
+}
+
+.trustworthiness-chatbot-proposal-status.is-changed {
+  border-color: color-mix(in srgb, var(--warning, #f5b84b) 42%, var(--border));
+  background: color-mix(in srgb, var(--warning, #f5b84b) 16%, var(--surface));
+  color: var(--text);
+}
+
+.trustworthiness-chatbot-pillars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trustworthiness-chatbot-pillar-card,
+.trustworthiness-chatbot-feedback-card {
+  display: grid;
+  gap: 10px;
+  padding: 0.95rem;
+  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.trustworthiness-chatbot-pillar-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trustworthiness-chatbot-pillar-card header span,
+.trustworthiness-chatbot-feedback-card span {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-pillar-card header strong {
+  font-size: var(--type-body);
+  font-weight: 700;
+}
+
+.trustworthiness-chatbot-feedback-card p {
+  max-height: 170px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.trustworthiness-chatbot-pillar-card .detail-score-editor {
+  margin-top: 2px;
+}
+
+.trustworthiness-chatbot-empty-state {
+  padding: 0.85rem 0;
 }
 
 .trustworthiness-chatbot-suggestions {
@@ -3895,6 +4573,41 @@ button {
   font-weight: 500;
 }
 
+.trustworthiness-chatbot-suggestion.is-primary {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 28%, var(--surface));
+}
+
+.trustworthiness-chatbot-save-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0.95rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: var(--radius-control);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 34%, var(--surface-strong)), color-mix(in srgb, var(--surface-strong) 92%, transparent));
+}
+
+.trustworthiness-chatbot-save-card div {
+  display: grid;
+  gap: 5px;
+}
+
+.trustworthiness-chatbot-save-card span {
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 700;
+}
+
+.trustworthiness-chatbot-save-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  line-height: 1.45;
+}
+
 .trustworthiness-chatbot-context strong {
   font-size: var(--type-body);
   font-weight: 600;
@@ -3905,19 +4618,47 @@ button {
   display: grid;
   gap: 10px;
   overflow: auto;
-  min-height: 220px;
+  min-height: 0;
+  max-height: none;
   padding-right: 4px;
 }
 
+.trustworthiness-chatbot-message {
+  max-width: min(82%, 760px);
+}
+
+.trustworthiness-chatbot-message.is-assistant {
+  justify-self: start;
+}
+
 .trustworthiness-chatbot-message.is-user {
+  justify-self: end;
   background: color-mix(in srgb, var(--accent-soft) 35%, var(--surface-strong));
+}
+
+.trustworthiness-chatbot-message.is-proposal {
+  max-width: 100%;
+  justify-self: stretch;
+}
+
+.trustworthiness-chatbot-message-tag {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .trustworthiness-chatbot-input {
   width: 100%;
-  min-height: 120px;
+  min-height: 112px;
   resize: vertical;
-  padding: 0.8rem 0.9rem;
+  padding: 0.8rem 3.95rem 0.8rem 0.9rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -3926,11 +4667,643 @@ button {
   line-height: 1.6;
 }
 
-.trustworthiness-chatbot-actions {
+.trustworthiness-chatbot-input-wrap {
+  position: relative;
+  display: grid;
+}
+
+.trustworthiness-chatbot-walkthrough-note {
+  margin: 0 0 0.7rem;
+  padding-right: 4.2rem;
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  line-height: 1.45;
+}
+
+.trustworthiness-chatbot-input-info,
+.trustworthiness-chatbot-send {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.trustworthiness-chatbot-send {
+  right: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 82%, var(--surface-muted));
+  color: var(--text);
+}
+
+.trustworthiness-chatbot-send:hover,
+.trustworthiness-chatbot-send:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 92%, var(--surface-muted));
+}
+
+.trustworthiness-chatbot-send:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.trustworthiness-chatbot-input-info {
+  right: 60px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 82%, transparent);
+  color: var(--text-muted);
+}
+
+.trustworthiness-chatbot-input-info svg,
+.trustworthiness-chatbot-send svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
+.trustworthiness-chatbot-input-info::before,
+.trustworthiness-chatbot-input-info::after {
+  position: absolute;
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.trustworthiness-chatbot-input-info::before {
+  content: "";
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%) translateY(4px);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+}
+
+.trustworthiness-chatbot-input-info::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 7px);
+  transform: translateX(-50%) translateY(4px);
+  width: min(260px, calc(100vw - 48px));
+  padding: 0.42rem 0.56rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 94%, black 6%);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  z-index: 5;
+}
+
+.trustworthiness-chatbot-input-info:hover,
+.trustworthiness-chatbot-input-info:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 18%, var(--surface-muted));
+}
+
+.trustworthiness-chatbot-input-info[data-tooltip]:hover::before,
+.trustworthiness-chatbot-input-info[data-tooltip]:hover::after,
+.trustworthiness-chatbot-input-info[data-tooltip]:focus-visible::before,
+.trustworthiness-chatbot-input-info[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.chat-action-toast-layer {
+  bottom: 24px;
+  right: 24px;
+}
+
+.chat-action-toast {
+  width: min(360px, calc(100vw - 48px));
+}
+
+.trustworthiness-chatbot-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 8, 18, 0.54);
+  backdrop-filter: blur(14px);
+}
+
+.trustworthiness-chatbot-confirm-modal {
+  width: min(520px, calc(100vw - 40px));
+  display: grid;
+  gap: 16px;
+  padding: 1.2rem;
+  border-radius: calc(var(--radius-panel) + 4px);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-soft) 26%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface-strong) 96%, black 4%);
+  box-shadow:
+    0 24px 72px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.trustworthiness-chatbot-confirm-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.trustworthiness-chatbot-confirm-copy span,
+.trustworthiness-chatbot-confirm-field span {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-confirm-copy h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.65rem;
+  line-height: 1.05;
+}
+
+.trustworthiness-chatbot-confirm-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body);
+  line-height: 1.55;
+}
+
+.trustworthiness-chatbot-confirm-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.trustworthiness-chatbot-confirm-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  color: var(--text);
+  font-size: var(--type-body-small);
+  font-weight: 600;
+}
+
+.trustworthiness-chatbot-confirm-selection {
+  display: grid;
+  gap: 6px;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.trustworthiness-chatbot-confirm-selection strong {
+  color: var(--text);
+  font-size: var(--type-body);
+}
+
+.trustworthiness-chatbot-confirm-selection small {
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  line-height: 1.45;
+}
+
+.trustworthiness-chatbot-confirm-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--type-body-small);
+  line-height: 1.45;
+}
+
+.trustworthiness-chatbot-confirm-field {
+  display: grid;
+  gap: 8px;
+}
+
+.trustworthiness-chatbot-confirm-field textarea {
+  width: 100%;
+  min-height: 128px;
+  resize: vertical;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.55;
+}
+
+.trustworthiness-chatbot-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.trustworthiness-chatbot-confirm-actions.is-multi {
+  flex-wrap: wrap;
+}
+
+.trustworthiness-chatbot-confirm-option,
+.trustworthiness-chatbot-confirm-primary {
+  min-height: 40px;
+  padding: 0.65rem 0.95rem;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: var(--type-body-small);
+  font-weight: 700;
+}
+
+.trustworthiness-chatbot-confirm-option {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.trustworthiness-chatbot-confirm-option.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.trustworthiness-chatbot-confirm-primary {
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 82%, var(--surface-muted));
+}
+
+.trustworthiness-chatbot-confirm-primary.is-selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.trustworthiness-chatbot-confirm-option:hover,
+.trustworthiness-chatbot-confirm-option:focus-visible,
+.trustworthiness-chatbot-confirm-primary:hover,
+.trustworthiness-chatbot-confirm-primary:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 92%, var(--surface-muted));
+}
+
+.trustworthiness-chatbot-confirm-option:hover,
+.trustworthiness-chatbot-confirm-option:focus-visible {
+  outline: none;
+}
+
+.trustworthiness-chatbot-secondary.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
+  color: color-mix(in srgb, var(--danger) 80%, white);
+}
+
+.trustworthiness-chatbot-secondary.is-danger:hover,
+.trustworthiness-chatbot-secondary.is-danger:focus-visible {
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-muted));
+}
+
+.trustworthiness-mock-chat-note {
+  display: grid;
+  gap: 6px;
+  padding: 0.95rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-control);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 28%, var(--surface-strong)), color-mix(in srgb, var(--surface-strong) 92%, transparent));
+}
+
+.trustworthiness-mock-chat-note strong {
+  font-size: var(--type-body);
+  font-weight: 700;
+}
+
+.trustworthiness-mock-chat-note p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.trustworthiness-mock-chat-messages {
+  gap: 12px;
+}
+
+.trustworthiness-mock-chat-row {
+  display: grid;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.trustworthiness-mock-chat-row.is-assistant {
+  justify-items: start;
+}
+
+.trustworthiness-mock-chat-row.is-user {
+  justify-items: end;
+}
+
+.trustworthiness-mock-chat-label {
+  padding: 0 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.trustworthiness-mock-chat-bubble {
+  max-width: min(82%, 720px);
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 22px 22px 22px 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, transparent), color-mix(in srgb, var(--surface-strong) 88%, transparent));
+  box-shadow: 0 14px 34px rgba(4, 6, 16, 0.18);
+}
+
+.trustworthiness-mock-chat-row.is-user .trustworthiness-mock-chat-bubble {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 22px 22px 10px 22px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 34%, var(--surface)), color-mix(in srgb, var(--accent-soft) 18%, var(--surface-strong)));
+}
+
+.trustworthiness-mock-chat-bubble p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.trustworthiness-chatbot-citations {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.trustworthiness-chatbot-change-source {
+  width: fit-content;
+  margin-top: 10px;
+  padding: 0.38rem 0.62rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-soft) 24%, var(--surface));
+  color: var(--text);
+  font-size: var(--type-body-small);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.trustworthiness-chatbot-evidence-question {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.trustworthiness-chatbot-evidence-question span {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-evidence-question p {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--type-body-small);
+  line-height: 1.45;
+}
+
+.trustworthiness-chatbot-citations > span {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.trustworthiness-chatbot-citations button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text);
+  text-align: left;
+}
+
+.trustworthiness-chatbot-citations button strong {
+  font-size: var(--type-body-small);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.trustworthiness-chatbot-citations button small {
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  line-height: 1.4;
+}
+
+.chat-review-side-sheet {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.chat-review-side-sheet-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-context-side-sheet {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.chat-agent-config-side-sheet {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.chat-context-side-sheet-body {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-agent-config-side-sheet-body {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-agent-config-description {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.chat-agent-config-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.chat-agent-action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-agent-action-card {
+  display: grid;
+  gap: 5px;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.chat-agent-action-card span {
+  color: var(--accent);
+  font-size: var(--type-label);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.chat-agent-action-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.chat-context-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.chat-context-section-header span {
+  color: var(--text-muted);
+  font-size: var(--type-body-small);
+  line-height: 1.4;
+}
+
+.chat-context-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.chat-context-summary-item,
+.chat-context-pillar-card {
+  display: grid;
+  gap: 6px;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.chat-context-summary-item span,
+.chat-context-pillar-card span {
+  color: var(--text-muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-context-summary-item strong,
+.chat-context-pillar-card strong {
+  font-size: var(--type-body);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.chat-context-pillar-list {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-context-pillar-card > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-context-pillar-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+@media (max-width: 900px) {
+  .trustworthiness-chatbot-modal {
+    width: min(100%, 920px);
+    max-height: 92vh;
+  }
+
+  .chat-review-side-sheet {
+    width: calc(100vw - 24px);
+  }
+
+  .trustworthiness-chatbot-proposal-head,
+  .trustworthiness-chatbot-save-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .trustworthiness-chatbot-header {
+    align-items: flex-start;
+  }
+
+  .trustworthiness-chatbot-header-actions {
+    flex-wrap: wrap;
+  }
+
+  .trustworthiness-chatbot-message,
+  .trustworthiness-mock-chat-bubble {
+    max-width: 100%;
+  }
+
+  .trustworthiness-chatbot-icon::after {
+    max-width: 220px;
+    white-space: normal;
+  }
+
+  .chat-context-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .trustworthiness-detail-save-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .trustworthiness-chatbot-confirm-actions {
+    flex-direction: column-reverse;
+  }
+
+  .trustworthiness-chatbot-confirm-actions > * {
+    width: 100%;
+  }
 }
 
 .trustworthiness-context-summary {
@@ -4044,14 +5417,12 @@ button {
 }
 
 .tw-suggestion-side-sheet {
-  z-index: 18;
   width: min(620px, calc(100vw - 32px));
 }
 
 .suggestion-detail-side-sheet {
-  z-index: 20;
-  width: min(560px, calc(100vw - 48px));
-  right: calc(min(620px, calc(100vw - 32px)) + 24px);
+  width: min(560px, calc(100vw - 32px));
+  right: 12px;
 }
 
 .suggestion-detail-panel {
@@ -4602,10 +5973,6 @@ button {
     justify-content: flex-end;
   }
 
-  .workspace-topbar-pill {
-    min-width: 0;
-  }
-
   .trustworthiness-summary {
     grid-template-columns: 1fr;
   }
@@ -4618,7 +5985,8 @@ button {
     border-radius: var(--radius-card);
   }
 
-  .trustworthiness-detail-resize-handle {
+  .trustworthiness-detail-resize-handle,
+  .chat-review-side-sheet-resize-handle {
     display: none;
   }
 

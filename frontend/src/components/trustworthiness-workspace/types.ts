@@ -38,6 +38,7 @@ export type GroupKey =
 export type FieldEntry = {
   name: string;
   value: ReactNode | unknown;
+  walkthroughId?: string;
 };
 
 export type RecordGroup = {
@@ -59,6 +60,8 @@ export type RecordSummary = {
   updatedLabel: string;
   weaknesses: string | null;
 };
+
+export type TrustworthinessRatingStatus = "Pending" | "Done";
 
 export type RecordPeriodMeta = {
   key: string;
@@ -287,38 +290,101 @@ export type TrustworthinessDraft = {
   reliabilityPoints: number | null;
 };
 
+export type TrustworthinessAssistantIntent =
+  | "review"
+  | "edit_pillar"
+  | "edit_feedback"
+  | "save"
+  | "clarify";
+
+export type TrustworthinessAssistantFocus = SuggestionPillarKey | "feedback" | null;
+export type TrustworthinessAssistantChangeSource =
+  | "model_evidence"
+  | "human_override"
+  | "mixed"
+  | "none";
+
+export type TrustworthinessAssistantProposal = {
+  credibilityPoints: number;
+  feedback: string;
+  groupThinkingPoints: number;
+  intimacyPoints: number;
+  reliabilityPoints: number;
+};
+
+export type TrustworthinessAssistantMeeting = {
+  actionItems: string[];
+  coachingAnalysis: string | null;
+  coachingSummary: string | null;
+  meetingDatetime: string | null;
+  meetingId: string;
+  metricsScores: Record<string, number | null>;
+  title: string;
+  topics: string[];
+  transcriptSummary: string | null;
+};
+
+export type TrustworthinessAssistantCitation = {
+  meetingId: string;
+  meetingTitle: string;
+  pillar?: SuggestionPillarKey | null;
+  reason: string;
+};
+
 export type ChatMessage = {
+  changeSource?: TrustworthinessAssistantChangeSource;
+  citations?: TrustworthinessAssistantCitation[];
   content: string;
+  evidenceQuestion?: string | null;
+  focusArea?: TrustworthinessAssistantFocus;
   id: string;
+  intent?: TrustworthinessAssistantIntent;
+  needsOptionalEvidence?: boolean;
   role: "assistant" | "user";
 };
 
+export type WalkthroughVariant = "manual" | "chatbot";
+
 export type TrustworthinessWorkspaceProps = {
   isWalkthroughOpen?: boolean;
+  onWalkthroughAbort?: (message?: string) => void;
+  onWalkthroughComplete?: () => void;
+  onWalkthroughToast?: (message: string) => void;
   walkthroughStepId?: string | null;
+  walkthroughVariant?: WalkthroughVariant | null;
 };
 
-export type ChatbotSuggestion = {
-  id: string;
-  label: string;
-  prompt: string;
+export type TrustworthinessAssistantSessionResponse = {
+  meetings: TrustworthinessAssistantMeeting[];
+  ok: true;
+  proposal: TrustworthinessAssistantProposal;
+  suggestion: TwSuggestionResponse;
+};
+
+export type TrustworthinessAssistantReplyResponse = {
+  changeSource: TrustworthinessAssistantChangeSource;
+  citations: TrustworthinessAssistantCitation[];
+  evidenceQuestion: string | null;
+  focusArea: TrustworthinessAssistantFocus;
+  message: string;
+  needsOptionalEvidence: boolean;
+  nextIntent: TrustworthinessAssistantIntent;
+  ok: true;
+  proposal: TrustworthinessAssistantProposal;
+  proposalChanged: boolean;
 };
 
 export type DetailGroupsOptions = {
   aiSuggestions: Partial<Record<EditableScoreField, PillarSuggestion>>;
   draft: TrustworthinessDraft | null;
   editable: boolean;
-  errorMessage: string | null;
-  errorTarget: EditableDraftTarget | null;
   feedbackGenerationError: string | null;
   isDirty: (target: EditableDraftTarget) => boolean;
   isGeneratingFeedback: boolean;
-  isSaving: (target: EditableDraftTarget) => boolean;
   onDiscard: (target: EditableDraftTarget) => void;
   onFeedbackChange: (value: string) => void;
   onGenerateFeedback: () => void;
   onPointsChange: (field: EditableScoreField, value: number) => void;
-  onSave: (target: EditableDraftTarget) => void;
 };
 
 export type ScoreEditorConfig = {

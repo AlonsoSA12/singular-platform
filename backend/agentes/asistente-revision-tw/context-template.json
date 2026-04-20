@@ -1,0 +1,130 @@
+{
+  "record": {
+    "id": "rec_example",
+    "evaluatedName": "Nombre del talento",
+    "evaluatedEmail": "talent@example.com",
+    "roleLabel": "Senior Backend Engineer",
+    "projectContext": "Singular Platform",
+    "status": "Pending",
+    "period": {
+      "label": "17 abr. 2026 - 17 may. 2026",
+      "start": "2026-04-17",
+      "end": "2026-05-17"
+    }
+  },
+  "twSuggestion": {
+    "recordId": "rec_example",
+    "generatedAt": "2026-04-17T18:20:00.000Z",
+    "meetingsUsed": 6,
+    "trustworthiness": {
+      "score": 6.5,
+      "percentage": "65%",
+      "meaning": "Needs calibration",
+      "confidence": "medium",
+      "explanation": "General explanation of the suggested score."
+    },
+    "pillars": {
+      "reliability": {
+        "points": 6,
+        "meaning": "Mostly reliable with visible follow-up gaps.",
+        "shortReason": "The talent follows through often but not consistently enough.",
+        "decisionDetail": {
+          "conclusion": "Reliability is acceptable but not fully dependable.",
+          "metricInputs": [
+            {
+              "metricName": "Follow-up closure rate",
+              "mappedTo": "reliability",
+              "value": 6,
+              "interpretation": "Moderate completion discipline."
+            }
+          ],
+          "positiveSignals": [],
+          "negativeSignals": [],
+          "uncertainty": [
+            "Evidence is concentrated in a small subset of meetings."
+          ]
+        },
+        "confidence": "medium"
+      },
+      "intimacy": {
+        "points": 7,
+        "meaning": "Builds working trust with stakeholders.",
+        "shortReason": "Shows empathy and collaboration in conversations.",
+        "decisionDetail": {
+          "conclusion": "Interaction quality is generally positive.",
+          "metricInputs": [],
+          "positiveSignals": [],
+          "negativeSignals": [],
+          "uncertainty": []
+        },
+        "confidence": "medium"
+      },
+      "groupThinking": {
+        "points": 5,
+        "meaning": "Needs stronger challenge and independent thinking.",
+        "shortReason": "There is limited evidence of healthy dissent.",
+        "decisionDetail": {
+          "conclusion": "More challenge behavior would improve this pillar.",
+          "metricInputs": [],
+          "positiveSignals": [],
+          "negativeSignals": [],
+          "uncertainty": []
+        },
+        "confidence": "medium"
+      },
+      "credibility": {
+        "points": 8,
+        "meaning": "Usually communicates with solid judgment.",
+        "shortReason": "The talent is perceived as technically credible.",
+        "decisionDetail": {
+          "conclusion": "Credibility is a visible strength.",
+          "metricInputs": [],
+          "positiveSignals": [],
+          "negativeSignals": [],
+          "uncertainty": []
+        },
+        "confidence": "high"
+      }
+    }
+  },
+  "proposal": {
+    "reliabilityPoints": 6,
+    "intimacyPoints": 7,
+    "groupThinkingPoints": 5,
+    "credibilityPoints": 8,
+    "feedback": "Professional English feedback draft."
+  },
+  "meetings": [
+    {
+      "meetingId": "mtg_001",
+      "title": "Weekly coaching sync",
+      "meetingDatetime": "2026-04-24T15:00:00.000Z",
+      "coachingSummary": "Short summary from coaching source.",
+      "coachingAnalysis": "Short analysis extracted from coaching source.",
+      "transcriptSummary": "Transcript summary if available.",
+      "topics": [
+        "Delivery follow-up",
+        "Stakeholder communication"
+      ],
+      "actionItems": [
+        "Confirm owner for blocker",
+        "Send follow-up note in 24h"
+      ],
+      "metricsScores": {
+        "clarity": 6,
+        "followThrough": 5
+      }
+    }
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "Explicame por que Reliability esta en 6."
+    },
+    {
+      "role": "assistant",
+      "content": "La evidencia apunta a seguimiento parcial, pero no consistente."
+    }
+  ],
+  "latestUserMessage": "Quiero mejorar el feedback general sin cambiar los puntajes."
+}

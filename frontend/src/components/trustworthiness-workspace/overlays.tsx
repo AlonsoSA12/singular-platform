@@ -4,13 +4,16 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
+  calculateTrustworthinessScoreFromProposal,
   formatMeetingDatetimeValue,
   formatSuggestionCacheAge,
+  formatTrustworthinessPercentageFromProposal,
   formatTranscriptTime,
   getConfidenceLabel,
   getEditablePillarMeaning,
   getImpactLabel,
   getPillarLabel,
+  getTrustworthinessMeaningFromScore,
   getSourceLabel,
   LoadingProgress,
   SUGGESTION_PILLAR_CONFIG,
@@ -19,13 +22,13 @@ import {
 } from "./helpers";
 import type {
   ChatMessage,
-  ChatbotSuggestion,
   CoachingTranscriptResponse,
   RecordSummary,
   SuggestionAppliedPoints,
   SuggestionCacheNotice,
   SuggestionNotification,
   SuggestionPillarKey,
+  TrustworthinessAssistantProposal,
   TrustworthinessFloatingToast,
   TrustworthinessRecord,
   TwGenerationProgress,
@@ -34,20 +37,41 @@ import type {
 
 type TrustworthinessChatbotModalProps = {
   chatbotDraftMessage: string;
+  chatbotError: string | null;
   chatbotMessages: ChatMessage[];
-  chatbotRecord: TrustworthinessRecord | null;
+  chatbotMeetingsCount: number;
+  chatbotProposal: TrustworthinessAssistantProposal | null;
   chatbotRecordSummary: RecordSummary | null;
-  chatbotSuggestions: ChatbotSuggestion[];
+  isChatbotPreparing: boolean;
+  isChatbotProposalSaved: boolean;
+  isChatbotResponding: boolean;
+  isChatbotSaving: boolean;
   onClose: () => void;
   onDraftChange: (value: string) => void;
-  onSendPrompt: (prompt: string) => void;
+  onFocusPrompt: (focus: SuggestionPillarKey | "feedback") => void;
+  onQuickSave: () => void;
   onSubmit: () => void;
 };
 
 export function TrustworthinessChatbotModal(props: TrustworthinessChatbotModalProps) {
-  if (!props.chatbotRecord || !props.chatbotRecordSummary) {
+  if (!props.chatbotRecordSummary) {
     return null;
   }
+
+  const canTriggerQuickActions =
+    !props.isChatbotPreparing &&
+    !props.isChatbotResponding &&
+    !props.isChatbotSaving &&
+    props.chatbotProposal !== null;
+  const proposalScore = props.chatbotProposal
+    ? calculateTrustworthinessScoreFromProposal(props.chatbotProposal)
+    : null;
+  const proposalPercentage = props.chatbotProposal
+    ? formatTrustworthinessPercentageFromProposal(props.chatbotProposal)
+    : null;
+  const proposalMeaning =
+    proposalScore !== null ? getTrustworthinessMeaningFromScore(proposalScore) : null;
+  const proposal = props.chatbotProposal;
 
   return (
     <div
@@ -62,7 +86,7 @@ export function TrustworthinessChatbotModal(props: TrustworthinessChatbotModalPr
       >
         <div className="trustworthiness-chatbot-header">
           <div className="trustworthiness-chatbot-header-copy">
-            <span>Asistente de evaluación</span>
+            <span>Asistente IA de TW</span>
             <h4>{props.chatbotRecordSummary.evaluatedName}</h4>
             <p>
               {props.chatbotRecordSummary.roleLabel} · {props.chatbotRecordSummary.status}
@@ -79,66 +103,190 @@ export function TrustworthinessChatbotModal(props: TrustworthinessChatbotModalPr
           </div>
         </div>
 
-        <div className="trustworthiness-chatbot-context-grid">
-          <div className="trustworthiness-chatbot-context">
-            <span>Contexto</span>
-            <strong>{props.chatbotRecordSummary.context}</strong>
-          </div>
-          <div className="trustworthiness-chatbot-context">
-            <span>Periodo</span>
-            <strong>{props.chatbotRecordSummary.periodLabel}</strong>
-          </div>
-          <div className="trustworthiness-chatbot-context">
-            <span>Trustworthiness actual</span>
-            <strong>{props.chatbotRecordSummary.scoreLabel}</strong>
-          </div>
-        </div>
-
-        <div className="trustworthiness-chatbot-suggestions">
-          {props.chatbotSuggestions.map((suggestion) => (
-            <button
-              className="trustworthiness-chatbot-suggestion"
-              key={suggestion.id}
-              onClick={() => props.onSendPrompt(suggestion.prompt)}
-              type="button"
-            >
-              {suggestion.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="trustworthiness-chatbot-messages">
-          {props.chatbotMessages.map((message) => (
-            <div
-              className={`trustworthiness-chatbot-message is-${message.role}`}
-              key={message.id}
-            >
-              <span>{message.role === "assistant" ? "Copilot" : "Tú"}</span>
-              <p>{message.content}</p>
+        <div className="trustworthiness-chatbot-shell">
+          <section className="trustworthiness-chatbot-thread-panel">
+            <div className="trustworthiness-chatbot-thread-meta">
+              <div className="trustworthiness-chatbot-meta-chip">
+                <span>Contexto</span>
+                <strong>{props.chatbotRecordSummary.context}</strong>
+              </div>
+              <div className="trustworthiness-chatbot-meta-chip">
+                <span>Periodo</span>
+                <strong>{props.chatbotRecordSummary.periodLabel}</strong>
+              </div>
+              <div className="trustworthiness-chatbot-meta-chip">
+                <span>Reuniones</span>
+                <strong>{props.isChatbotPreparing ? "Preparando..." : props.chatbotMeetingsCount}</strong>
+              </div>
             </div>
-          ))}
-        </div>
 
-        <div className="trustworthiness-chatbot-composer">
-          <textarea
-            className="trustworthiness-chatbot-input"
-            onChange={(event) => props.onDraftChange(event.target.value)}
-            placeholder="Describe el desempeño del talento para construir la evaluación..."
-            rows={4}
-            value={props.chatbotDraftMessage}
-          />
-          <div className="trustworthiness-chatbot-actions">
-            <small>
-              Úsalo para pensar la evaluación antes de mover estrellas o guardar la narrativa.
-            </small>
-            <button
-              className="trustworthiness-chatbot-send"
-              onClick={props.onSubmit}
-              type="button"
-            >
-              Enviar
-            </button>
-          </div>
+            {props.chatbotError ? (
+              <p className="workspace-response-error">{props.chatbotError}</p>
+            ) : null}
+
+            <div className="trustworthiness-chatbot-messages">
+              {props.isChatbotPreparing ? (
+                <LoadingProgress label="Preparando el chat y cargando la propuesta inicial..." />
+              ) : null}
+
+              {proposal ? (
+                <article className="trustworthiness-chatbot-message is-assistant is-proposal">
+                  <span>Asistente TW</span>
+                  <div className="trustworthiness-chatbot-proposal">
+                    <div className="trustworthiness-chatbot-proposal-head">
+                      <div>
+                        <span>Propuesta inicial</span>
+                        <h5>
+                          {proposalPercentage ?? "Sin propuesta"}{" "}
+                          {proposalMeaning ? <small>{proposalMeaning}</small> : null}
+                        </h5>
+                      </div>
+                      <span
+                        className={`trustworthiness-chatbot-proposal-status ${
+                          props.isChatbotProposalSaved ? "is-saved" : ""
+                        }`}
+                      >
+                        {props.isChatbotSaving
+                          ? "Guardando..."
+                          : props.isChatbotProposalSaved
+                            ? "Guardado"
+                            : "Pendiente por guardar"}
+                      </span>
+                    </div>
+
+                    <div className="trustworthiness-chatbot-pillars">
+                      {SUGGESTION_PILLAR_CONFIG.map((pillar) => {
+                        const value = proposal[pillar.draftField];
+
+                        return (
+                          <article className="trustworthiness-chatbot-pillar-card" key={pillar.key}>
+                            <header>
+                              <span>{pillar.label}</span>
+                              <strong>{value}/10</strong>
+                            </header>
+                            <SuggestionStarEditor disabled value={value} />
+                            <p>{getEditablePillarMeaning(pillar.key, value)}</p>
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    <div className="trustworthiness-chatbot-feedback-card">
+                      <span>Feedback sugerido</span>
+                      <p>{proposal.feedback || "Sin feedback generado."}</p>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+
+              {props.chatbotMessages.map((message) => (
+                <div
+                  className={`trustworthiness-chatbot-message is-${message.role}`}
+                  key={message.id}
+                >
+                  <span>{message.role === "assistant" ? "Asistente TW" : "Tú"}</span>
+                  {message.focusArea ? (
+                    <small className="trustworthiness-chatbot-message-tag">
+                      {message.focusArea === "feedback"
+                        ? "Feedback"
+                        : getPillarLabel(message.focusArea)}
+                    </small>
+                  ) : null}
+                  <p>{message.content}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="trustworthiness-chatbot-suggestions">
+              <button
+                className="trustworthiness-chatbot-suggestion is-primary"
+                disabled={!canTriggerQuickActions || props.isChatbotProposalSaved}
+                onClick={props.onQuickSave}
+                type="button"
+              >
+                {props.isChatbotSaving
+                  ? "Guardando..."
+                  : props.isChatbotProposalSaved
+                    ? "Guardado"
+                    : "Está bien, guardar"}
+              </button>
+              {SUGGESTION_PILLAR_CONFIG.map((pillar) => (
+                <button
+                  className="trustworthiness-chatbot-suggestion"
+                  disabled={!canTriggerQuickActions}
+                  key={pillar.key}
+                  onClick={() => props.onFocusPrompt(pillar.key)}
+                  type="button"
+                >
+                  Revisar {pillar.label}
+                </button>
+              ))}
+              <button
+                className="trustworthiness-chatbot-suggestion"
+                disabled={!canTriggerQuickActions}
+                onClick={() => props.onFocusPrompt("feedback")}
+                type="button"
+              >
+                Revisar feedback
+              </button>
+            </div>
+
+            <div className="trustworthiness-chatbot-composer">
+              <textarea
+                className="trustworthiness-chatbot-input"
+                disabled={props.isChatbotPreparing || props.isChatbotResponding}
+                onChange={(event) => props.onDraftChange(event.target.value)}
+                placeholder="Escribe como si hablaras con un evaluador asistido por IA..."
+                rows={4}
+                value={props.chatbotDraftMessage}
+              />
+              <div className="trustworthiness-chatbot-actions">
+                <small>
+                  Este modal ya es el espacio conversacional para revisar la propuesta antes de guardarla.
+                </small>
+                <button
+                  className="trustworthiness-chatbot-send"
+                  disabled={props.isChatbotPreparing || props.isChatbotResponding}
+                  onClick={props.onSubmit}
+                  type="button"
+                >
+                  {props.isChatbotResponding ? "Pensando..." : "Enviar"}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <aside className="trustworthiness-chatbot-side-panel">
+            <div className="trustworthiness-chatbot-side-card">
+              <span>Sesión</span>
+              <strong>Chat de revisión TW</strong>
+              <p>
+                Aquí conversas con el agente sobre la sugerencia inicial, decides si guardarla
+                o si quieres tocar un pilar o el feedback.
+              </p>
+            </div>
+
+            <div className="trustworthiness-chatbot-side-card">
+              <span>Estado</span>
+              <strong>{props.chatbotRecordSummary.status}</strong>
+              <p>
+                {props.isChatbotPreparing
+                  ? "El agente está preparando el contexto inicial."
+                  : props.isChatbotProposalSaved
+                    ? "La propuesta actual ya quedó guardada."
+                    : "La propuesta sigue abierta para revisión."}
+              </p>
+            </div>
+
+            <div className="trustworthiness-chatbot-side-card">
+              <span>Qué puedes hacer</span>
+              <ul className="trustworthiness-chatbot-side-list">
+                <li>Pedir explicación de cualquier pilar.</li>
+                <li>Editar el feedback general.</li>
+                <li>Confirmar y guardar desde el mismo chat.</li>
+              </ul>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
@@ -151,6 +299,7 @@ type TranscriptSideSheetProps = {
   selectedTranscriptMeetingId: string | null;
   transcriptError: string | null;
   transcriptResponse: CoachingTranscriptResponse | null;
+  zIndex?: number;
 };
 
 export function TranscriptSideSheet(props: TranscriptSideSheetProps) {
@@ -159,7 +308,11 @@ export function TranscriptSideSheet(props: TranscriptSideSheetProps) {
   }
 
   return (
-    <aside className="transcript-side-sheet" aria-label="Transcript de reunión">
+    <aside
+      className="transcript-side-sheet"
+      aria-label="Transcript de reunión"
+      style={props.zIndex !== undefined ? { zIndex: props.zIndex } : undefined}
+    >
       <div className="transcript-side-sheet-header">
         <div>
           <span>Transcript</span>
@@ -257,6 +410,7 @@ type TrustworthinessSuggestionSideSheetProps = {
   suggestionDraftPoints: Record<SuggestionPillarKey, number> | null;
   suggestionError: string | null;
   twSuggestion: TwSuggestionResponse | null;
+  zIndex?: number;
 };
 
 export function TrustworthinessSuggestionSideSheet(props: TrustworthinessSuggestionSideSheetProps) {
@@ -287,7 +441,11 @@ export function TrustworthinessSuggestionSideSheet(props: TrustworthinessSuggest
   return (
     <>
       {createPortal(
-        <aside className="transcript-side-sheet tw-suggestion-side-sheet" aria-label="Sugerencia TW">
+        <aside
+          className="transcript-side-sheet tw-suggestion-side-sheet"
+          aria-label="Sugerencia TW"
+          style={props.zIndex !== undefined ? { zIndex: props.zIndex } : undefined}
+        >
           <div className="transcript-side-sheet-header">
             <div>
               <span>Sugerencia TW</span>
@@ -613,6 +771,7 @@ type SuggestionDetailModalProps = {
   onOpenTranscript: (meetingId: string) => void;
   selectedSuggestionPillar: SuggestionPillarKey | null;
   twSuggestion: TwSuggestionResponse | null;
+  zIndex?: number;
 };
 
 export function SuggestionDetailModal(props: SuggestionDetailModalProps) {
@@ -632,6 +791,7 @@ export function SuggestionDetailModal(props: SuggestionDetailModalProps) {
       aria-label={`Detalle de ${getPillarLabel(props.selectedSuggestionPillar)}`}
       className="transcript-side-sheet suggestion-detail-side-sheet"
       role="dialog"
+      style={props.zIndex !== undefined ? { zIndex: props.zIndex } : undefined}
     >
       <div
         className="suggestion-detail-panel"

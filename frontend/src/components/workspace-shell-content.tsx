@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { TrustworthinessWorkspace } from "@/components/trustworthiness-workspace";
+import type { WalkthroughVariant } from "@/components/trustworthiness-workspace/types";
 import { WorkspaceSettings } from "@/components/workspace-settings";
 
 type WorkspaceShellContentProps = {
@@ -12,63 +13,221 @@ type WorkspaceShellContentProps = {
 };
 
 type WalkthroughStep = {
+  autoOpenPanel?: "agent" | "context" | "save_confirmation";
   body: string;
+  enterAction?: "open_chatbot";
   id: string;
   selector: string;
+  targetPanel?: "chat" | "chat_agent" | "chat_context" | "chat_save_confirmation" | "workspace";
   title: string;
+  waitFor?: "chat_context" | "chat_shell" | "chat_step";
 };
 
-const WALKTHROUGH_STEPS: WalkthroughStep[] = [
+const MANUAL_WALKTHROUGH_STEPS: WalkthroughStep[] = [
   {
     id: "overview",
     selector: '[data-walkthrough="workspace-overview"]',
     title: "TW Monthly",
     body:
-      "Esta vista centraliza las evaluaciones mensuales de Trustworthiness. Desde aqui filtras periodos, revisas el estado operativo y entras al detalle de cada evaluacion."
+      "Esta vista centraliza las evaluaciones mensuales de Trustworthiness. Desde aquí revisas qué evaluaciones siguen pendientes, entras al detalle y completas la calificación manual."
   },
   {
     id: "filters",
     selector: '[data-walkthrough="workspace-filters"]',
     title: "Filtros principales",
     body:
-      "Periodos define la ventana mensual que consultas y Status recorta las evaluaciones visibles por estado. Cada cambio refresca la tabla inferior."
+      "Usa Periodos para definir la ventana mensual que estás auditando y Status para ver solo las evaluaciones en el estado que necesitas trabajar. La tabla se actualiza con esos filtros."
   },
   {
     id: "table",
     selector: '[data-walkthrough="workspace-period-table"]',
-    title: "Como leer la tabla",
+    title: "Tabla de evaluaciones",
     body:
-      "Cada fila es una evaluacion. Leela de izquierda a derecha: persona, contexto, rol, score de Trustworthiness, fortaleza, debilidad, estado, periodo y fecha de actualizacion."
+      "Cada fila corresponde a una evaluación. Aquí ves rápidamente la persona evaluada, el contexto, el rol, el score actual, fortalezas, debilidades, estado y última actualización."
   },
   {
     id: "detail-entry",
     selector: '[data-walkthrough="workspace-period-table"]',
-    title: "Como entrar al detalle",
+    title: "Abrir detalle",
     body:
-      "Para abrir una evaluacion, haz clic sobre cualquier fila. El sistema abre el panel lateral con el registro completo y sus acciones."
+      "Haz clic en una fila para abrir el detalle de la evaluación. Ese panel lateral es el espacio principal para revisar evidencia, ajustar el estado y editar la calificación manual."
   },
   {
-    id: "detail-actions",
-    selector: '[data-walkthrough="detail-actions"]',
-    title: "Acciones del detalle",
+    id: "detail-snapshot",
+    selector: '[data-walkthrough="detail-snapshot"]',
+    title: "Snapshot de evaluación",
     body:
-      "En la cabecera del detalle tienes tres acciones: generar sugerencia TW, abrir el chatbot de apoyo y cerrar el panel actual."
+      "En la parte superior del detalle tienes el resumen rápido: Trustworthiness, estado, período y fecha de actualización. Este bloque te da contexto antes de tocar la evaluación."
   },
   {
-    id: "detail-sections",
-    selector: '[data-walkthrough="detail-groups"]',
-    title: "Secciones del detalle",
+    id: "detail-status",
+    selector: '[data-walkthrough="detail-status"]',
+    title: "Estado de la evaluación",
     body:
-      "El detalle esta organizado por bloques. Arriba ves el snapshot rapido y debajo las secciones Resumen, Personas, Trustworthiness y Narrativa, cada una agrupando campos del registro."
+      "Aquí eliges el estado objetivo entre Pending y Done, pero el cambio no se guarda solo. La confirmación final manda: puedes cerrar como Draft o como Done cuando termines."
+  },
+  {
+    id: "detail-summary",
+    selector: '[data-walkthrough="detail-summary"]',
+    title: "Resumen y contexto",
+    body:
+      "Los bloques de resumen te ayudan a entender la lectura general del registro: fortalezas, debilidades, personas relacionadas y contexto evaluado. Úsalos como referencia antes de ajustar puntajes."
   },
   {
     id: "detail-meetings",
     selector: '[data-walkthrough="detail-meetings"]',
-    title: "Evidencia de reuniones",
+    title: "Detalle de reuniones",
     body:
-      "Detalle de reuniones cruza las sesiones relacionadas con el talento. Desde aqui puedes abrir transcripts y validar la evidencia que alimenta la evaluacion."
+      "Este bloque cruza las reuniones relacionadas con el talento dentro del período seleccionado. Aquí validas si existe evidencia suficiente para sostener o ajustar la evaluación."
+  },
+  {
+    id: "detail-transcript",
+    selector: '[data-walkthrough="detail-transcript"]',
+    title: "Abrir transcript",
+    body:
+      "Si necesitas más detalle, abre un transcript desde una reunión relacionada. Eso te permite revisar la conversación original y confirmar si el puntaje y el feedback reflejan la evidencia."
+  },
+  {
+    id: "detail-trustworthiness",
+    selector: '[data-walkthrough="detail-trustworthiness"]',
+    title: "Editar pilares",
+    body:
+      "En la sección Trustworthiness puedes ajustar manualmente los pilares: Reliability, Intimacy, Group Thinking y Credibility. Cambia las estrellas según tu criterio como evaluador."
+  },
+  {
+    id: "detail-feedback",
+    selector: '[data-walkthrough="detail-feedback"]',
+    title: "Editar feedback",
+    body:
+      "Este bloque reúne la narrativa final de la evaluación: ves el campo Feedback completo, puedes editar el texto y también disparar Generar con IA para proponer una nueva redacción alineada con los puntajes."
+  },
+  {
+    id: "detail-save",
+    selector: '[data-walkthrough="detail-save"]',
+    title: "Guardar cambios",
+    body:
+      "Cuando hay cambios pendientes aparece un único CTA para guardar la evaluación. Esa confirmación final te deja elegir Guardar como Draft, Guardar como Done o Discard para salir sin persistir nada."
   }
 ];
+
+const CHATBOT_WALKTHROUGH_STEPS: WalkthroughStep[] = [
+  {
+    body:
+      "Este botón inicia el flujo demo del chatbot de revisión. El sistema prepara una sugerencia TW simulada, monta reuniones demo y luego abre el chat.",
+    enterAction: "open_chatbot",
+    id: "chatbot-entry",
+    selector: '[data-walkthrough="chatbot-entry"]',
+    targetPanel: "workspace",
+    title: "Abrir chat desde la tabla"
+  },
+  {
+    body:
+      "Apenas empieza el WT Chatbot, se abre el chat de revisión con una propuesta demo y contexto simulado, sin esperar generación ni cruces reales.",
+    id: "chatbot-shell",
+    selector: '[data-walkthrough="chatbot-shell-header"]',
+    targetPanel: "chat",
+    title: "Chat listo con TW generado",
+    waitFor: "chat_shell"
+  },
+  {
+    body:
+      "Aquí ves la propuesta activa: score sugerido, estado de la propuesta, pilares editables y feedback base con el que conversará el asistente.",
+    id: "chatbot-proposal",
+    selector: '[data-walkthrough="chatbot-proposal-card"]',
+    targetPanel: "chat",
+    title: "Propuesta activa",
+    waitFor: "chat_step"
+  },
+  {
+    body:
+      "Este mensaje demuestra cómo el chatbot explica el resultado con base en la evidencia disponible, citando reuniones y destacando señales que suben o bajan el score.",
+    id: "chatbot-explanation",
+    selector: '[data-walkthrough="chatbot-explanation-bubble"]',
+    targetPanel: "chat",
+    title: "Explicación basada en evidencia",
+    waitFor: "chat_step"
+  },
+  {
+    body:
+      "Las acciones rápidas aceleran la revisión: puedes preparar guardado o enfocarte en un pilar específico o en el feedback general.",
+    id: "chatbot-quick-actions",
+    selector: '[data-walkthrough="chatbot-quick-actions"]',
+    targetPanel: "chat",
+    title: "Acciones rápidas del chat",
+    waitFor: "chat_step"
+  },
+  {
+    body:
+      "Este composer es el punto de entrada para conversar con el asistente. En el walkthrough se muestra como demo guiada, sin enviar prompts reales.",
+    id: "chatbot-composer",
+    selector: '[data-walkthrough="chatbot-composer"]',
+    targetPanel: "chat",
+    title: "Pregunta o ajuste",
+    waitFor: "chat_step"
+  },
+  {
+    autoOpenPanel: "context",
+    body:
+      "Desde este acceso se abre el panel de contexto del chat, donde se resume qué información alimenta al asistente antes de conversar o guardar.",
+    id: "chatbot-context-trigger",
+    selector: '[data-walkthrough="chatbot-context-trigger"]',
+    targetPanel: "chat",
+    title: "Abrir contexto del chat",
+    waitFor: "chat_step"
+  },
+  {
+    body:
+      "Este panel muestra la base del contexto: talento, proyecto, período oficial y la salida de Generate TW que se convirtió en la propuesta del chat.",
+    id: "chatbot-context-panel",
+    selector: '[data-walkthrough="chatbot-context-panel"]',
+    targetPanel: "chat_context",
+    title: "Base del contexto y salida de Generate TW",
+    waitFor: "chat_context"
+  },
+  {
+    body:
+      "Aquí se listan las reuniones relacionadas dentro del período seleccionado. Desde este punto también puedes abrir transcript para profundizar la evidencia.",
+    id: "chatbot-context-meetings",
+    selector: '[data-walkthrough="chatbot-context-meetings"]',
+    targetPanel: "chat_context",
+    title: "Detalle de reuniones y transcript",
+    waitFor: "chat_context"
+  },
+  {
+    autoOpenPanel: "agent",
+    body:
+      "Este panel deja visible la configuración del agente: modelo, objetivos, guardrails y acciones soportadas por el Asistente de Revisión TW.",
+    id: "chatbot-agent-panel",
+    selector: '[data-walkthrough="chatbot-agent-panel"]',
+    targetPanel: "chat_agent",
+    title: "Configuración del agente",
+    waitFor: "chat_step"
+  },
+  {
+    body:
+      "Cuando la propuesta ya fue revisada, este es el disparador para preparar el guardado desde el chat. En el walkthrough no persiste cambios reales.",
+    id: "chatbot-save-trigger",
+    selector: '[data-walkthrough="chatbot-save-trigger"]',
+    targetPanel: "chat",
+    title: "Preparar guardado",
+    waitFor: "chat_step"
+  },
+  {
+    autoOpenPanel: "save_confirmation",
+    body:
+      "Este es el último paso del flujo: la confirmación final antes de guardar. Aquí eliges Draft, Done o Discard. En WT Chatbot llegamos hasta aquí en modo seguro, sin ejecutar el save real.",
+    id: "chatbot-save-confirmation",
+    selector: '[data-walkthrough="chatbot-save-confirmation"]',
+    targetPanel: "chat_save_confirmation",
+    title: "Confirmación final",
+    waitFor: "chat_step"
+  }
+];
+
+const WALKTHROUGH_DEFINITIONS: Record<WalkthroughVariant, WalkthroughStep[]> = {
+  chatbot: CHATBOT_WALKTHROUGH_STEPS,
+  manual: MANUAL_WALKTHROUGH_STEPS
+};
 
 type HighlightRect = {
   height: number;
@@ -82,11 +241,62 @@ export function WorkspaceShellContent({
   userLabel,
   userRole
 }: WorkspaceShellContentProps) {
+  const walkthroughMenuRef = useRef<HTMLDetailsElement>(null);
+  const [activeWalkthroughVariant, setActiveWalkthroughVariant] =
+    useState<WalkthroughVariant>("manual");
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [highlightRect, setHighlightRect] = useState<HighlightRect | null>(null);
+  const [walkthroughToast, setWalkthroughToast] = useState<{
+    id: number;
+    message: string;
+  } | null>(null);
 
-  const activeStep = WALKTHROUGH_STEPS[activeStepIndex];
+  const activeSteps = WALKTHROUGH_DEFINITIONS[activeWalkthroughVariant];
+  const activeStep =
+    activeSteps[Math.min(activeStepIndex, Math.max(0, activeSteps.length - 1))] ?? activeSteps[0];
+  const shouldPinWalkthroughPanelTop =
+    typeof window !== "undefined" &&
+    highlightRect !== null &&
+    highlightRect.top + highlightRect.height / 2 > window.innerHeight * 0.54;
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      const detailsElement = walkthroughMenuRef.current;
+
+      if (!detailsElement?.open) {
+        return;
+      }
+
+      const target = event.target;
+
+      if (target instanceof Node && !detailsElement.contains(target)) {
+        detailsElement.open = false;
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!walkthroughToast) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setWalkthroughToast((current) =>
+        current?.id === walkthroughToast.id ? null : current
+      );
+    }, 2600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [walkthroughToast]);
 
   useEffect(() => {
     if (!isWalkthroughOpen) {
@@ -99,19 +309,17 @@ export function WorkspaceShellContent({
 
     let timeoutId = 0;
     let rafId = 0;
-    let attempts = 0;
+    let isActive = true;
 
     const updateHighlight = () => {
+      if (!isActive) {
+        return;
+      }
+
       const target = document.querySelector<HTMLElement>(activeStep.selector);
 
       if (!target) {
-        if (attempts < 12) {
-          attempts += 1;
-          timeoutId = window.setTimeout(updateHighlight, 80);
-        } else {
-          setHighlightRect(null);
-        }
-
+        timeoutId = window.setTimeout(updateHighlight, activeStep.waitFor ? 140 : 90);
         return;
       }
 
@@ -141,7 +349,6 @@ export function WorkspaceShellContent({
     updateHighlight();
 
     const handleViewportChange = () => {
-      attempts = 0;
       window.clearTimeout(timeoutId);
       window.cancelAnimationFrame(rafId);
       updateHighlight();
@@ -151,6 +358,7 @@ export function WorkspaceShellContent({
     document.addEventListener("scroll", handleViewportChange, true);
 
     return () => {
+      isActive = false;
       document.body.style.overflow = "";
       window.clearTimeout(timeoutId);
       window.cancelAnimationFrame(rafId);
@@ -159,7 +367,11 @@ export function WorkspaceShellContent({
     };
   }, [activeStep, isWalkthroughOpen]);
 
-  function openWalkthrough() {
+  function openWalkthrough(variant: WalkthroughVariant) {
+    if (walkthroughMenuRef.current) {
+      walkthroughMenuRef.current.open = false;
+    }
+    setActiveWalkthroughVariant(variant);
     setActiveStepIndex(0);
     setIsWalkthroughOpen(true);
   }
@@ -175,12 +387,34 @@ export function WorkspaceShellContent({
 
   function goToNextStep() {
     setActiveStepIndex((current) => {
-      if (current >= WALKTHROUGH_STEPS.length - 1) {
+      if (current >= activeSteps.length - 1) {
         setIsWalkthroughOpen(false);
         return 0;
       }
 
       return current + 1;
+    });
+  }
+
+  function handleOpenChatbotWalkthrough() {
+    openWalkthrough("chatbot");
+  }
+
+  function handleWalkthroughAbort(message?: string) {
+    closeWalkthrough();
+
+    if (message) {
+      setWalkthroughToast({
+        id: Date.now(),
+        message
+      });
+    }
+  }
+
+  function handleWalkthroughToast(message: string) {
+    setWalkthroughToast({
+      id: Date.now(),
+      message
     });
   }
 
@@ -196,21 +430,34 @@ export function WorkspaceShellContent({
         </div>
 
         <div className="workspace-topbar-actions">
-          <button
-            aria-label="Abrir walkthrough de TW Monthly"
-            className="workspace-topbar-info workspace-topbar-info-button"
-            data-tooltip="Abrir walkthrough de TW Monthly"
-            onClick={openWalkthrough}
-            type="button"
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M12 2.75A9.25 9.25 0 1 0 21.25 12 9.26 9.26 0 0 0 12 2.75Zm0 1.5A7.75 7.75 0 1 1 4.25 12 7.76 7.76 0 0 1 12 4.25Zm0 3a1.06 1.06 0 1 0 0 2.12 1.06 1.06 0 0 0 0-2.12Zm-1 4.13a.75.75 0 0 0 0 1.5h.25v3.87H11a.75.75 0 0 0 0 1.5h2a.75.75 0 0 0 0-1.5h-.25v-4.62a.75.75 0 0 0-.75-.75Z" />
-            </svg>
-          </button>
-          <div className="workspace-topbar-pill">
-            <span className="workspace-topbar-pill-dot" aria-hidden="true" />
-            <span>Active View</span>
-          </div>
+          <details className="workspace-topbar-walkthrough-menu" ref={walkthroughMenuRef}>
+            <summary
+              aria-label="Opciones de walkthrough de TW Monthly"
+              className="workspace-topbar-info workspace-topbar-info-button"
+            >
+              <svg viewBox="0 0 24 24">
+                <path d="M12 2.75A9.25 9.25 0 1 0 21.25 12 9.26 9.26 0 0 0 12 2.75Zm0 1.5A7.75 7.75 0 1 1 4.25 12 7.76 7.76 0 0 1 12 4.25Zm0 3a1.06 1.06 0 1 0 0 2.12 1.06 1.06 0 0 0 0-2.12Zm-1 4.13a.75.75 0 0 0 0 1.5h.25v3.87H11a.75.75 0 0 0 0 1.5h2a.75.75 0 0 0 0-1.5h-.25v-4.62a.75.75 0 0 0-.75-.75Z" />
+              </svg>
+            </summary>
+            <div className="workspace-topbar-walkthrough-panel">
+              <button
+                className="workspace-topbar-walkthrough-option"
+                onClick={() => openWalkthrough("manual")}
+                type="button"
+              >
+                <strong>WT Manual</strong>
+                <span>Recorre el flujo actual completo de TW Monthly.</span>
+              </button>
+              <button
+                className="workspace-topbar-walkthrough-option"
+                onClick={handleOpenChatbotWalkthrough}
+                type="button"
+              >
+                <strong>WT Chatbot</strong>
+                <span>Recorre el flujo conversacional con Generate TW, reuniones y respuestas demo.</span>
+              </button>
+            </div>
+          </details>
           <WorkspaceSettings
             userInitial={userInitial}
             userLabel={userLabel}
@@ -223,7 +470,11 @@ export function WorkspaceShellContent({
       <section className="workspace-main">
         <TrustworthinessWorkspace
           isWalkthroughOpen={isWalkthroughOpen}
+          onWalkthroughAbort={handleWalkthroughAbort}
+          onWalkthroughComplete={closeWalkthrough}
+          onWalkthroughToast={handleWalkthroughToast}
           walkthroughStepId={activeStep?.id ?? null}
+          walkthroughVariant={isWalkthroughOpen ? activeWalkthroughVariant : null}
         />
       </section>
 
@@ -288,12 +539,14 @@ export function WorkspaceShellContent({
                   }}
                 />
               ) : null}
-              <div className="workspace-walkthrough-panel">
+              <div
+                className={`workspace-walkthrough-panel ${shouldPinWalkthroughPanelTop ? "is-top" : "is-bottom"}`}
+              >
                 <div className="workspace-walkthrough-panel-head">
                   <div>
                     <span>Walkthrough</span>
                     <strong>
-                      Paso {activeStepIndex + 1} de {WALKTHROUGH_STEPS.length}
+                      Paso {activeStepIndex + 1} de {activeSteps.length}
                     </strong>
                   </div>
                   <button
@@ -310,7 +563,7 @@ export function WorkspaceShellContent({
                     aria-hidden="true"
                     className="workspace-walkthrough-progress-bar"
                     style={{
-                      width: `${((activeStepIndex + 1) / WALKTHROUGH_STEPS.length) * 100}%`
+                      width: `${((activeStepIndex + 1) / activeSteps.length) * 100}%`
                     }}
                   />
                 </div>
@@ -334,10 +587,19 @@ export function WorkspaceShellContent({
                     onClick={goToNextStep}
                     type="button"
                   >
-                    {activeStepIndex === WALKTHROUGH_STEPS.length - 1 ? "Finalizar" : "Siguiente"}
+                    {activeStepIndex === activeSteps.length - 1 ? "Finalizar" : "Siguiente"}
                   </button>
                 </div>
               </div>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {walkthroughToast && typeof document !== "undefined"
+        ? createPortal(
+            <div className="workspace-topbar-toast" role="status">
+              {walkthroughToast.message}
             </div>,
             document.body
           )

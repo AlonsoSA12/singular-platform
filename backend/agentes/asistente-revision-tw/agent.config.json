@@ -1,0 +1,67 @@
+{
+  "id": "asistente-revision-tw",
+  "name": "Asistente de Revision TW",
+  "version": "0.1.0",
+  "owner": "backend",
+  "status": "draft",
+  "description": "Copiloto conversacional para revisar una sugerencia de Trustworthiness con trazabilidad a evidencia.",
+  "provider": "openai",
+  "model": {
+    "recommended": "gpt-5.4-mini",
+    "fallback": "gpt-5.4",
+    "temperature": 0.2,
+    "reasoning_effort": "medium",
+    "max_output_tokens": 1200,
+    "response_format": "json_schema"
+  },
+  "conversation": {
+    "assistant_language": "es",
+    "feedback_language": "en",
+    "single_case_per_thread": true,
+    "history_window_messages": 10
+  },
+  "prompt_files": {
+    "system_prompt": "./system-prompt.md",
+    "context_template": "./context-template.json",
+    "response_schema": "./response-schema.json"
+  },
+  "objectives": [
+    "Explicar el score global y cada pilar.",
+    "Responder preguntas sobre la evidencia.",
+    "Proponer ajustes puntuales cuando el evaluador lo pida.",
+    "Preparar una confirmacion final antes de guardar."
+  ],
+  "guardrails": [
+    "Usar solo el contexto y la evidencia suministrada.",
+    "Mantener el feedback propuesto alineado con la propuesta activa en cada respuesta.",
+    "No inventar reuniones, hechos, personas ni resultados.",
+    "Distinguir claramente entre evidencia e inferencia.",
+    "Respetar la autoridad final del evaluador humano sobre cambios de puntaje.",
+    "Aplicar ajustes explícitos del evaluador y marcarlos como criterio humano cuando la evidencia sea limitada.",
+    "Preguntar evidencia opcional como máximo una vez y sin bloquear el ajuste.",
+    "No afirmar que los cambios ya se guardaron.",
+    "Siempre devolver la propuesta completa, incluso si no cambia."
+  ],
+  "actions": [
+    {
+      "id": "clarify",
+      "description": "Explica la logica de la sugerencia o de un pilar."
+    },
+    {
+      "id": "edit_pillar",
+      "description": "Propone cambios a un pilar especifico."
+    },
+    {
+      "id": "edit_feedback",
+      "description": "Propone cambios al feedback general."
+    },
+    {
+      "id": "review",
+      "description": "Mantiene la conversacion en modo revision."
+    },
+    {
+      "id": "save",
+      "description": "Indica que el usuario aprobo y el frontend/backend puede continuar con guardado."
+    }
+  ]
+}

@@ -18,6 +18,7 @@ type TrustworthinessRecordUpdateFields = {
   "Group Thinking Points AI JSON"?: string | null;
   "Intimacy Points"?: number | null;
   "Intimacy AI JSON"?: string | null;
+  "Rating Status"?: "Pending" | "Done";
   "Reliability Points"?: number | null;
   "Reliability AI JSON"?: string | null;
 };
@@ -76,6 +77,77 @@ type FeedbackGenerationInput = {
   projectContext?: string | null;
   roleLabel?: string | null;
 };
+
+type TrustworthinessAssistantProposal = {
+  credibilityPoints: number;
+  feedback: string;
+  groupThinkingPoints: number;
+  intimacyPoints: number;
+  reliabilityPoints: number;
+};
+
+type TrustworthinessAssistantMeeting = {
+  actionItems: string[];
+  coachingAnalysis: string | null;
+  coachingSummary: string | null;
+  meetingDatetime: string | null;
+  meetingId: string;
+  metricsScores: Record<string, number | null>;
+  title: string;
+  topics: string[];
+  transcriptSummary: string | null;
+};
+
+type TrustworthinessAssistantCitation = {
+  meetingId: string;
+  meetingTitle: string;
+  pillar: PillarKey | null;
+  reason: string;
+};
+
+type TrustworthinessAssistantConversationInput = {
+  evaluatedName: string;
+  history: Array<{
+    content: string;
+    role: "assistant" | "user";
+  }>;
+  meetings: TrustworthinessAssistantMeeting[];
+  projectContext?: string | null;
+  prompt: string;
+  proposal: TrustworthinessAssistantProposal;
+  roleLabel?: string | null;
+  suggestion: Record<string, unknown>;
+};
+
+type TrustworthinessAssistantSaveInput = {
+  agentId?: string;
+  agentVersion?: string;
+  confirmedByUser?: boolean;
+  context?: {
+    end?: string;
+    meetingsCount?: number;
+    participantEmail?: string;
+    recordId?: string;
+    start?: string;
+  };
+  proposal?: TrustworthinessAssistantProposal;
+  ratingStatus?: "Pending" | "Done";
+  twSuggestion?: Record<string, unknown>;
+};
+
+type TrustworthinessAssistantIntent =
+  | "review"
+  | "edit_pillar"
+  | "edit_feedback"
+  | "save"
+  | "clarify";
+
+type TrustworthinessAssistantFocusArea = PillarKey | "feedback" | null;
+type TrustworthinessAssistantChangeSource =
+  | "model_evidence"
+  | "human_override"
+  | "mixed"
+  | "none";
 export type TrustworthinessSuggestionStage =
   | "validating_evaluation_data"
   | "fetching_airtable_meetings"
@@ -111,6 +183,8 @@ const COACHING_INPUT_LOG_METRICS_JSON_FIELD = "metrics_json";
 const SPRINT_TABLE_NAME = "Sprints";
 const SPRINT_NAME_FIELD = "Sprint Name";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const TRUSTWORTHINESS_ASSISTANT_AGENT_ID = "asistente-revision-tw";
+const TRUSTWORTHINESS_ASSISTANT_AGENT_VERSION = "0.1.0";
 
 function escapeFormulaValue(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
@@ -554,6 +628,30 @@ function getFirstTextValue(value: unknown) {
   return null;
 }
 
+function getFirstPersonEmail(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  for (const item of value) {
+    if (isPlainRecord(item) && typeof item.email === "string" && item.email.trim().length > 0) {
+      return item.email.trim();
+    }
+  }
+
+  return null;
+}
+
+function getDateLiteralValue(value: unknown) {
+  const textValue = getFirstTextValue(value);
+
+  if (!textValue) {
+    return null;
+  }
+
+  return textValue.slice(0, 10);
+}
+
 function parseJsonRecord(value: unknown) {
   if (typeof value !== "string" || value.trim().length === 0) {
     return null;
@@ -740,6 +838,7 @@ function createCoachingContextRecord(
   const participantValue = getFirstTextValue(record.fields[COACHING_INPUT_LOG_PARTICIPANT_FIELD]) ?? "";
   const participantEmails = extractEmailsFromParticipant(participantValue);
   const rawPayload = parseJsonRecordFromFields(record, COACHING_INPUT_LOG_RAW_PAYLOAD_FIELD);
+  const evidenceMeeting = createCoachingEvidenceMeeting(record);
   const relevantEmails = normalizedActiveSessionEmail &&
     normalizedActiveSessionEmail !== normalizedParticipantEmail
     ? [normalizedParticipantEmail, normalizedActiveSessionEmail]
@@ -748,10 +847,16 @@ function createCoachingContextRecord(
   return {
     id: record.id,
     fields: {
+      action_items: evidenceMeeting.actionItems,
+      coaching_analysis: evidenceMeeting.coachingAnalysis,
+      coaching_summary: evidenceMeeting.coachingSummary,
+      meeting_datetime: evidenceMeeting.when,
+      meeting_title: evidenceMeeting.title,
+      metrics_scores: evidenceMeeting.metricsScores,
       [COACHING_INPUT_LOG_UNIQUE_KEY_FIELD]:
         getFirstTextValue(record.fields[COACHING_INPUT_LOG_UNIQUE_KEY_FIELD]) ?? record.id,
-      meeting_datetime: getCoachingMeetingDatetime(rawPayload, record),
-      meeting_title: getCoachingMeetingTitle(rawPayload)
+      topics: evidenceMeeting.topics,
+      transcript_summary: evidenceMeeting.transcriptSummary
     },
     participantEmails,
     participants: getCoachingParticipantsForEmails(rawPayload, relevantEmails)
@@ -804,6 +909,17 @@ async function hydrateTrustworthinessRecords(records: AirtableRecord[]) {
 }
 
 function canEditTrustworthinessRecord(record: AirtableRecord, evaluatorEmail: string) {
+  assertTrustworthinessRecordOwnership(record, evaluatorEmail);
+  const ratingStatus = record.fields["Rating Status"];
+  const normalizedStatus =
+    typeof ratingStatus === "string" ? normalizeEmail(ratingStatus) : "";
+
+  if (normalizedStatus !== "pending") {
+    throw new Error("Solo se pueden editar evaluaciones con status Pending.");
+  }
+}
+
+function assertTrustworthinessRecordOwnership(record: AirtableRecord, evaluatorEmail: string) {
   const normalizedEvaluatorEmail = normalizeEmail(evaluatorEmail);
   const rawEvaluatorField = record.fields[TRUSTWORTHINESS_EVALUATOR_EMAIL_FIELD];
   const evaluatorEmails = Array.isArray(rawEvaluatorField)
@@ -815,17 +931,28 @@ function canEditTrustworthinessRecord(record: AirtableRecord, evaluatorEmail: st
   const isOwnedByEvaluator = evaluatorEmails.some(
     (value) => typeof value === "string" && normalizeEmail(value) === normalizedEvaluatorEmail
   );
-  const ratingStatus = record.fields["Rating Status"];
-  const normalizedStatus =
-    typeof ratingStatus === "string" ? normalizeEmail(ratingStatus) : "";
 
   if (!isOwnedByEvaluator) {
     throw new Error("No autorizado para editar esta evaluación.");
   }
+}
 
-  if (normalizedStatus !== "pending") {
-    throw new Error("Solo se pueden editar evaluaciones con status Pending.");
+function normalizeTrustworthinessRatingStatus(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
   }
+
+  const normalizedValue = normalizeEmail(value);
+
+  if (normalizedValue === "pending") {
+    return "Pending";
+  }
+
+  if (normalizedValue === "done") {
+    return "Done";
+  }
+
+  return null;
 }
 
 export async function listTrustworthinessRecords(selectedPeriods: string[], evaluatorEmail: string) {
@@ -865,7 +992,25 @@ export async function updateTrustworthinessRecord(
     throw new Error("No se encontró la evaluación solicitada.");
   }
 
-  canEditTrustworthinessRecord(existingRecord, evaluatorEmail);
+  assertTrustworthinessRecordOwnership(existingRecord, evaluatorEmail);
+
+  const fieldKeys = Object.keys(fields);
+  const isStatusOnlyUpdate =
+    fieldKeys.length > 0 && fieldKeys.every((fieldKey) => fieldKey === "Rating Status");
+
+  if (!isStatusOnlyUpdate) {
+    canEditTrustworthinessRecord(existingRecord, evaluatorEmail);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fields, "Rating Status")) {
+    const normalizedStatus = normalizeTrustworthinessRatingStatus(fields["Rating Status"]);
+
+    if (!normalizedStatus) {
+      throw new Error("El status debe ser Pending o Done.");
+    }
+
+    fields["Rating Status"] = normalizedStatus;
+  }
 
   await updateAirtableRecord(tableName, recordId, fields);
 
@@ -882,6 +1027,185 @@ export async function updateTrustworthinessRecord(
   }
 
   return hydratedRecord;
+}
+
+function getTrustworthinessRecordEvaluatedEmail(record: AirtableRecord) {
+  return (
+    getFirstTextValue(record.fields["Email From Evaluated"]) ??
+    getFirstPersonEmail(record.fields["User (de Evaluated) (de TW Examns)"])
+  );
+}
+
+function getAssistantSuggestionPillarJson(
+  suggestion: Record<string, unknown> | undefined,
+  pillar: PillarKey
+) {
+  if (!suggestion || !isPlainRecord(suggestion.pillars)) {
+    return undefined;
+  }
+
+  const pillarPayload = suggestion.pillars[pillar];
+
+  if (!isPlainRecord(pillarPayload)) {
+    return undefined;
+  }
+
+  return JSON.stringify(pillarPayload);
+}
+
+function validateAssistantSaveContext(
+  recordId: string,
+  record: AirtableRecord,
+  input: TrustworthinessAssistantSaveInput
+) {
+  const context = input.context;
+
+  if (!context || context.recordId !== recordId) {
+    throw new Error("El contexto del chat no corresponde a la evaluación.");
+  }
+
+  const participantEmail = context.participantEmail?.trim().toLowerCase();
+
+  if (!participantEmail) {
+    throw new Error("El contexto del chat no incluye el talento evaluado.");
+  }
+
+  const recordEvaluatedEmail = getTrustworthinessRecordEvaluatedEmail(record);
+
+  if (recordEvaluatedEmail && normalizeEmail(recordEvaluatedEmail) !== participantEmail) {
+    throw new Error("El contexto del chat pertenece a otro talento.");
+  }
+
+  if (
+    typeof context.meetingsCount !== "number" ||
+    !Number.isInteger(context.meetingsCount) ||
+    context.meetingsCount < 0
+  ) {
+    throw new Error("El contexto del chat no incluye una cantidad válida de reuniones.");
+  }
+}
+
+function mergeSavedAssistantProposalIntoRecord(
+  record: AirtableRecord,
+  proposal: TrustworthinessAssistantProposal,
+  twSuggestion: Record<string, unknown> | undefined
+) {
+  const fields: Record<string, unknown> = {
+    ...record.fields,
+    "Credibility Points": proposal.credibilityPoints,
+    "Feedback": proposal.feedback,
+    "Group Thinking Points": proposal.groupThinkingPoints,
+    "Intimacy Points": proposal.intimacyPoints,
+    "Reliability Points": proposal.reliabilityPoints
+  };
+  const credibilityAiJson = getAssistantSuggestionPillarJson(twSuggestion, "credibility");
+  const groupThinkingAiJson = getAssistantSuggestionPillarJson(twSuggestion, "groupThinking");
+  const intimacyAiJson = getAssistantSuggestionPillarJson(twSuggestion, "intimacy");
+  const reliabilityAiJson = getAssistantSuggestionPillarJson(twSuggestion, "reliability");
+
+  if (credibilityAiJson) {
+    fields["Credibility AI JSON"] = credibilityAiJson;
+  }
+
+  if (groupThinkingAiJson) {
+    fields["Group Thinking Points AI JSON"] = groupThinkingAiJson;
+  }
+
+  if (intimacyAiJson) {
+    fields["Intimacy AI JSON"] = intimacyAiJson;
+  }
+
+  if (reliabilityAiJson) {
+    fields["Reliability AI JSON"] = reliabilityAiJson;
+  }
+
+  return {
+    ...record,
+    fields
+  };
+}
+
+export async function saveTrustworthinessAssistantProposal(
+  recordId: string,
+  evaluatorEmail: string,
+  input: TrustworthinessAssistantSaveInput
+) {
+  if (!input.confirmedByUser) {
+    throw new Error("La confirmación explícita del usuario es obligatoria para guardar.");
+  }
+
+  if (
+    input.agentId !== TRUSTWORTHINESS_ASSISTANT_AGENT_ID ||
+    input.agentVersion !== TRUSTWORTHINESS_ASSISTANT_AGENT_VERSION
+  ) {
+    throw new Error("La configuración del agente no corresponde al asistente de revisión TW.");
+  }
+
+  if (!input.proposal) {
+    throw new Error("La propuesta del asistente es obligatoria para guardar.");
+  }
+
+  const proposal = validateAssistantProposal(input.proposal);
+  const normalizedStatus = normalizeTrustworthinessRatingStatus(input.ratingStatus);
+
+  if (!normalizedStatus) {
+    throw new Error("El status debe ser Pending o Done.");
+  }
+
+  const tableName = getTrustworthinessTableName();
+  const [existingRecord] = await fetchRecordsByIds(tableName, [recordId], []);
+
+  if (!existingRecord) {
+    throw new Error("No se encontró la evaluación solicitada.");
+  }
+
+  canEditTrustworthinessRecord(existingRecord, evaluatorEmail);
+  validateAssistantSaveContext(recordId, existingRecord, input);
+
+  const fields: TrustworthinessRecordUpdateFields = {
+    "Credibility Points": proposal.credibilityPoints,
+    "Feedback": proposal.feedback,
+    "Group Thinking Points": proposal.groupThinkingPoints,
+    "Intimacy Points": proposal.intimacyPoints,
+    "Rating Status": normalizedStatus,
+    "Reliability Points": proposal.reliabilityPoints
+  };
+  const credibilityAiJson = getAssistantSuggestionPillarJson(input.twSuggestion, "credibility");
+  const groupThinkingAiJson = getAssistantSuggestionPillarJson(input.twSuggestion, "groupThinking");
+  const intimacyAiJson = getAssistantSuggestionPillarJson(input.twSuggestion, "intimacy");
+  const reliabilityAiJson = getAssistantSuggestionPillarJson(input.twSuggestion, "reliability");
+
+  if (credibilityAiJson) {
+    fields["Credibility AI JSON"] = credibilityAiJson;
+  }
+
+  if (groupThinkingAiJson) {
+    fields["Group Thinking Points AI JSON"] = groupThinkingAiJson;
+  }
+
+  if (intimacyAiJson) {
+    fields["Intimacy AI JSON"] = intimacyAiJson;
+  }
+
+  if (reliabilityAiJson) {
+    fields["Reliability AI JSON"] = reliabilityAiJson;
+  }
+
+  await updateAirtableRecord(tableName, recordId, fields);
+
+  const [updatedRecord] = await fetchRecordsByIds(tableName, [recordId], []);
+
+  if (!updatedRecord) {
+    throw new Error("No fue posible refrescar la evaluación actualizada.");
+  }
+
+  const [hydratedRecord] = await hydrateTrustworthinessRecords([updatedRecord]);
+
+  if (!hydratedRecord) {
+    throw new Error("No fue posible hidratar la evaluación actualizada.");
+  }
+
+  return mergeSavedAssistantProposalIntoRecord(hydratedRecord, proposal, input.twSuggestion);
 }
 
 export async function listCoachingInputLogs(
@@ -910,6 +1234,7 @@ export async function listCoachingInputLogs(
         COACHING_INPUT_LOG_UNIQUE_KEY_FIELD,
         COACHING_INPUT_LOG_PARTICIPANT_FIELD,
         COACHING_INPUT_LOG_RECEIVED_AT_FIELD,
+        COACHING_INPUT_LOG_METRICS_JSON_FIELD,
         COACHING_INPUT_LOG_RAW_PAYLOAD_FIELD
       ],
       filterByFormula
@@ -1132,6 +1457,99 @@ function hasEvidenceText(meeting: CoachingEvidenceMeeting) {
   );
 }
 
+function toTrustworthinessAssistantMeeting(
+  meeting: CoachingEvidenceMeeting
+): TrustworthinessAssistantMeeting {
+  return {
+    actionItems: meeting.actionItems,
+    coachingAnalysis: meeting.coachingAnalysis,
+    coachingSummary: meeting.coachingSummary,
+    meetingDatetime: meeting.when,
+    meetingId: meeting.rawRecordId,
+    metricsScores: meeting.metricsScores,
+    title: meeting.title,
+    topics: meeting.topics,
+    transcriptSummary: meeting.transcriptSummary
+  };
+}
+
+async function prepareTrustworthinessSuggestionContext(
+  participantEmail: string,
+  activeSessionEmail: string | undefined,
+  explicitRange: DateRangeLiteral,
+  emitStage?: TrustworthinessSuggestionStageEmitter
+) {
+  await emitStage?.("fetching_airtable_meetings");
+  const records = await fetchCoachingInputLogRecordsForContext(
+    participantEmail,
+    activeSessionEmail,
+    explicitRange
+  );
+
+  await emitStage?.("building_meeting_evidence");
+  const meetings = records.map(createCoachingEvidenceMeeting).filter(hasEvidenceText);
+
+  if (records.length === 0) {
+    throw new Error("No hay reuniones suficientes para sugerir TW.");
+  }
+
+  if (meetings.length === 0) {
+    throw new Error("Hay reuniones, pero no hay evidencia textual suficiente.");
+  }
+
+  return meetings;
+}
+
+function createProposalFromSuggestion(
+  suggestion: Awaited<ReturnType<typeof createTrustworthinessSuggestion>>,
+  feedback: string
+): TrustworthinessAssistantProposal {
+  return {
+    credibilityPoints: suggestion.pillars.credibility.points,
+    feedback,
+    groupThinkingPoints: suggestion.pillars.groupThinking.points,
+    intimacyPoints: suggestion.pillars.intimacy.points,
+    reliabilityPoints: suggestion.pillars.reliability.points
+  };
+}
+
+function createFeedbackInputFromSuggestion(params: {
+  evaluatedName: string;
+  existingFeedback?: string | null;
+  projectContext?: string | null;
+  roleLabel?: string | null;
+  suggestion: Awaited<ReturnType<typeof createTrustworthinessSuggestion>>;
+}): FeedbackGenerationInput {
+  return {
+    evaluatedName: params.evaluatedName,
+    existingFeedback: params.existingFeedback ?? null,
+    pillars: {
+      credibility: {
+        aiSuggestion: params.suggestion.pillars.credibility,
+        meaning: params.suggestion.pillars.credibility.meaning,
+        points: params.suggestion.pillars.credibility.points
+      },
+      groupThinking: {
+        aiSuggestion: params.suggestion.pillars.groupThinking,
+        meaning: params.suggestion.pillars.groupThinking.meaning,
+        points: params.suggestion.pillars.groupThinking.points
+      },
+      intimacy: {
+        aiSuggestion: params.suggestion.pillars.intimacy,
+        meaning: params.suggestion.pillars.intimacy.meaning,
+        points: params.suggestion.pillars.intimacy.points
+      },
+      reliability: {
+        aiSuggestion: params.suggestion.pillars.reliability,
+        meaning: params.suggestion.pillars.reliability.meaning,
+        points: params.suggestion.pillars.reliability.points
+      }
+    },
+    projectContext: params.projectContext ?? null,
+    roleLabel: params.roleLabel ?? null
+  };
+}
+
 function createSuggestionPrompt(meetings: CoachingEvidenceMeeting[]) {
   return [
     "Generate JSON only. You are assisting a human evaluator with Monthly Trustworthiness for a talent.",
@@ -1270,6 +1688,104 @@ const FEEDBACK_SUGGESTION_SCHEMA = {
   properties: {
     feedback: {
       type: "string"
+    }
+  }
+};
+
+const TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "message",
+    "nextIntent",
+    "focusArea",
+    "proposalChanged",
+    "changeSource",
+    "needsOptionalEvidence",
+    "evidenceQuestion",
+    "proposal",
+    "citations"
+  ],
+  properties: {
+    message: {
+      type: "string"
+    },
+    nextIntent: {
+      type: "string",
+      enum: ["review", "edit_pillar", "edit_feedback", "save", "clarify"]
+    },
+    focusArea: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["reliability", "intimacy", "groupThinking", "credibility", "feedback"]
+        },
+        {
+          type: "null"
+        }
+      ]
+    },
+    proposalChanged: {
+      type: "boolean"
+    },
+    changeSource: {
+      type: "string",
+      enum: ["model_evidence", "human_override", "mixed", "none"]
+    },
+    needsOptionalEvidence: {
+      type: "boolean"
+    },
+    evidenceQuestion: {
+      anyOf: [
+        {
+          type: "string"
+        },
+        {
+          type: "null"
+        }
+      ]
+    },
+    proposal: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "reliabilityPoints",
+        "intimacyPoints",
+        "groupThinkingPoints",
+        "credibilityPoints",
+        "feedback"
+      ],
+      properties: {
+        reliabilityPoints: { type: "integer", minimum: 1, maximum: 10 },
+        intimacyPoints: { type: "integer", minimum: 1, maximum: 10 },
+        groupThinkingPoints: { type: "integer", minimum: 1, maximum: 10 },
+        credibilityPoints: { type: "integer", minimum: 1, maximum: 10 },
+        feedback: { type: "string" }
+      }
+    },
+    citations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["meetingId", "meetingTitle", "reason", "pillar"],
+        properties: {
+          meetingId: { type: "string" },
+          meetingTitle: { type: "string" },
+          reason: { type: "string" },
+          pillar: {
+            anyOf: [
+              {
+                type: "string",
+                enum: ["reliability", "intimacy", "groupThinking", "credibility"]
+              },
+              {
+                type: "null"
+              }
+            ]
+          }
+        }
+      }
     }
   }
 };
@@ -1516,6 +2032,295 @@ async function callOpenAIForFeedback(input: FeedbackGenerationInput) {
   }
 }
 
+function validateAssistantProposal(
+  proposal: TrustworthinessAssistantProposal
+): TrustworthinessAssistantProposal {
+  const credibilityPoints = getNumberOrNull(proposal.credibilityPoints);
+  const groupThinkingPoints = getNumberOrNull(proposal.groupThinkingPoints);
+  const intimacyPoints = getNumberOrNull(proposal.intimacyPoints);
+  const reliabilityPoints = getNumberOrNull(proposal.reliabilityPoints);
+
+  if (credibilityPoints === null || !Number.isInteger(credibilityPoints) || credibilityPoints < 1 || credibilityPoints > 10) {
+    throw new Error("La propuesta del asistente tiene un valor inválido en credibilityPoints.");
+  }
+
+  if (
+    groupThinkingPoints === null ||
+    !Number.isInteger(groupThinkingPoints) ||
+    groupThinkingPoints < 1 ||
+    groupThinkingPoints > 10
+  ) {
+    throw new Error("La propuesta del asistente tiene un valor inválido en groupThinkingPoints.");
+  }
+
+  if (intimacyPoints === null || !Number.isInteger(intimacyPoints) || intimacyPoints < 1 || intimacyPoints > 10) {
+    throw new Error("La propuesta del asistente tiene un valor inválido en intimacyPoints.");
+  }
+
+  if (
+    reliabilityPoints === null ||
+    !Number.isInteger(reliabilityPoints) ||
+    reliabilityPoints < 1 ||
+    reliabilityPoints > 10
+  ) {
+    throw new Error("La propuesta del asistente tiene un valor inválido en reliabilityPoints.");
+  }
+
+  const feedback = typeof proposal.feedback === "string" ? proposal.feedback.trim() : "";
+
+  if (feedback.length === 0) {
+    throw new Error("La propuesta del asistente debe incluir feedback.");
+  }
+
+  return {
+    credibilityPoints,
+    feedback,
+    groupThinkingPoints,
+    intimacyPoints,
+    reliabilityPoints
+  };
+}
+
+function areAssistantProposalsEqual(
+  left: TrustworthinessAssistantProposal,
+  right: TrustworthinessAssistantProposal
+) {
+  return (
+    left.credibilityPoints === right.credibilityPoints &&
+    left.feedback === right.feedback &&
+    left.groupThinkingPoints === right.groupThinkingPoints &&
+    left.intimacyPoints === right.intimacyPoints &&
+    left.reliabilityPoints === right.reliabilityPoints
+  );
+}
+
+function validateAssistantCitations(value: unknown): TrustworthinessAssistantCitation[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((citation) => {
+      if (!isPlainRecord(citation)) {
+        return null;
+      }
+
+      const meetingId = typeof citation.meetingId === "string" ? citation.meetingId.trim() : "";
+      const meetingTitle =
+        typeof citation.meetingTitle === "string" ? citation.meetingTitle.trim() : "";
+      const reason = typeof citation.reason === "string" ? citation.reason.trim() : "";
+      const pillar =
+        citation.pillar === "reliability" ||
+        citation.pillar === "intimacy" ||
+        citation.pillar === "groupThinking" ||
+        citation.pillar === "credibility"
+          ? citation.pillar
+          : null;
+
+      if (!meetingId || !meetingTitle || !reason) {
+        return null;
+      }
+
+      return {
+        meetingId,
+        meetingTitle,
+        pillar,
+        reason
+      };
+    })
+    .filter((citation): citation is TrustworthinessAssistantCitation => citation !== null)
+    .slice(0, 6);
+}
+
+function normalizeAssistantChangeSource(
+  value: unknown,
+  proposalChanged: boolean
+): TrustworthinessAssistantChangeSource {
+  if (
+    value === "model_evidence" ||
+    value === "human_override" ||
+    value === "mixed" ||
+    value === "none"
+  ) {
+    return proposalChanged ? value : "none";
+  }
+
+  return proposalChanged ? "mixed" : "none";
+}
+
+function createTrustworthinessAssistantPrompt(
+  input: TrustworthinessAssistantConversationInput
+) {
+  const recentHistory = input.history
+    .slice(-10)
+    .map((message) => `${message.role === "assistant" ? "ASSISTANT" : "USER"}: ${message.content}`)
+    .join("\n\n");
+
+  return [
+    "You are Asistente de Revision TW (agent id: asistente-revision-tw).",
+    "You are a conversational Trustworthiness evaluation assistant helping a human evaluator review a draft.",
+    "Reply in Spanish.",
+    "Use only the supplied meeting evidence, suggestion data, current proposal, and explicit human evaluator input. Do not invent meetings, events, names, facts, or outcomes.",
+    "The current proposal is the working draft. The human evaluator has final authority over score changes.",
+    "If the evaluator explicitly requests score changes, apply those changes to the returned proposal unless a requested score would be outside 1..10.",
+    "Do not block requested score changes only because meeting evidence is insufficient. Instead, explain briefly that the adjustment is being applied as human judgment.",
+    "If useful, ask at most one short optional evidence question. Do not pressure, repeat, or require evidence before applying the user's requested change.",
+    "Use changeSource='human_override' when changes are mainly based on the evaluator's judgment, 'model_evidence' when based on meeting evidence, 'mixed' when both apply, and 'none' when proposal is unchanged.",
+    "Set needsOptionalEvidence=true only when an optional human rationale would improve traceability. evidenceQuestion must be one concise optional question or null.",
+    "Always return the full proposal object, even if unchanged.",
+    "Keep proposal.feedback written in professional English. Keep message written in Spanish.",
+    "Whenever proposal scores change, update proposal.feedback so it stays aligned with the latest scores, evidence, and human judgment source.",
+    "If changes are human_override or mixed, mention in proposal.feedback that the final calibration includes evaluator judgment, without inventing unsupported evidence.",
+    "Be concise, useful, and grounded in the evidence.",
+    "Set proposalChanged to true only when the returned proposal differs from the current proposal.",
+    "Include citations for meeting evidence you reference. Use only meeting ids and titles present in Meeting evidence JSON.",
+    "If the user clearly approves, confirms, or asks to continue/apply/save, set nextIntent to save.",
+    "If the user wants to discuss one pillar, set nextIntent to edit_pillar and focusArea to that pillar.",
+    "If the user wants to adjust the narrative or general feedback, set nextIntent to edit_feedback and focusArea to feedback.",
+    "If the user mainly asks for explanation or rationale, set nextIntent to clarify.",
+    "Do not claim the result is already saved. Saving happens after your response.",
+    "",
+    `Evaluated person: ${input.evaluatedName}`,
+    `Role: ${input.roleLabel && input.roleLabel.trim().length > 0 ? input.roleLabel : "Unknown"}`,
+    `Project context: ${
+      input.projectContext && input.projectContext.trim().length > 0
+        ? input.projectContext
+        : "No project context available"
+    }`,
+    "",
+    `Current suggestion JSON:\n${JSON.stringify(input.suggestion, null, 2)}`,
+    "",
+    `Current proposal JSON:\n${JSON.stringify(input.proposal, null, 2)}`,
+    "",
+    `Meeting evidence JSON:\n${JSON.stringify(input.meetings, null, 2)}`,
+    "",
+    `Conversation so far:\n${recentHistory || "No previous messages."}`,
+    "",
+    `Latest user message:\n${input.prompt}`,
+    "",
+    "Return JSON only."
+  ].join("\n");
+}
+
+async function callOpenAIForTrustworthinessAssistant(
+  input: TrustworthinessAssistantConversationInput
+) {
+  const openAIConfig = getOpenAIConfig();
+
+  if (!openAIConfig.apiKey || !openAIConfig.model) {
+    throw new Error("No hay modelo configurado para conversar sobre TW.");
+  }
+
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    body: JSON.stringify({
+      input: createTrustworthinessAssistantPrompt(input),
+      model: openAIConfig.model,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "tw_assistant_reply",
+          strict: true,
+          schema: TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA
+        }
+      }
+    }),
+    headers: {
+      Authorization: `Bearer ${openAIConfig.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    let message = `OpenAI request failed with status ${response.status}`;
+
+    try {
+      const payload = (await response.json()) as { error?: { message?: string } };
+      if (payload.error?.message) {
+        message = payload.error.message;
+      }
+    } catch {
+      message = `OpenAI request failed with status ${response.status}`;
+    }
+
+    throw new Error(message);
+  }
+
+  const payload = await response.json();
+  const outputText = extractOpenAIOutputText(payload);
+
+  if (!outputText) {
+    throw new Error("No fue posible generar una respuesta del asistente.");
+  }
+
+  try {
+    const parsedOutput = JSON.parse(outputText) as {
+      changeSource?: unknown;
+      citations?: unknown;
+      evidenceQuestion?: unknown;
+      focusArea?: TrustworthinessAssistantFocusArea;
+      message?: unknown;
+      needsOptionalEvidence?: unknown;
+      nextIntent?: unknown;
+      proposal?: TrustworthinessAssistantProposal;
+      proposalChanged?: unknown;
+    };
+
+    if (typeof parsedOutput.message !== "string" || parsedOutput.message.trim().length === 0) {
+      throw new Error("No fue posible generar una respuesta del asistente.");
+    }
+
+    const nextIntent: TrustworthinessAssistantIntent =
+      parsedOutput.nextIntent === "review" ||
+      parsedOutput.nextIntent === "edit_pillar" ||
+      parsedOutput.nextIntent === "edit_feedback" ||
+      parsedOutput.nextIntent === "save" ||
+      parsedOutput.nextIntent === "clarify"
+        ? parsedOutput.nextIntent
+        : "clarify";
+    const focusArea: TrustworthinessAssistantFocusArea =
+      parsedOutput.focusArea === "reliability" ||
+      parsedOutput.focusArea === "intimacy" ||
+      parsedOutput.focusArea === "groupThinking" ||
+      parsedOutput.focusArea === "credibility" ||
+      parsedOutput.focusArea === "feedback"
+        ? parsedOutput.focusArea
+        : null;
+
+    if (!parsedOutput.proposal) {
+      throw new Error("No fue posible generar una propuesta del asistente.");
+    }
+    const currentProposal = validateAssistantProposal(input.proposal);
+    const proposal = validateAssistantProposal(parsedOutput.proposal);
+    const proposalChanged =
+      typeof parsedOutput.proposalChanged === "boolean"
+        ? parsedOutput.proposalChanged || !areAssistantProposalsEqual(currentProposal, proposal)
+        : !areAssistantProposalsEqual(currentProposal, proposal);
+    const evidenceQuestion =
+      typeof parsedOutput.evidenceQuestion === "string" &&
+      parsedOutput.evidenceQuestion.trim().length > 0
+        ? parsedOutput.evidenceQuestion.trim()
+        : null;
+
+    return {
+      changeSource: normalizeAssistantChangeSource(parsedOutput.changeSource, proposalChanged),
+      citations: validateAssistantCitations(parsedOutput.citations),
+      evidenceQuestion,
+      focusArea,
+      message: parsedOutput.message.trim(),
+      needsOptionalEvidence:
+        typeof parsedOutput.needsOptionalEvidence === "boolean"
+          ? parsedOutput.needsOptionalEvidence
+          : evidenceQuestion !== null,
+      nextIntent,
+      proposal,
+      proposalChanged
+    };
+  } catch {
+    throw new Error("No fue posible generar una respuesta del asistente.");
+  }
+}
+
 export async function getCoachingInputLogTranscript(
   recordId: string,
   participantEmail: string,
@@ -1562,30 +2367,11 @@ export async function getCoachingInputLogTranscript(
   };
 }
 
-export async function createTrustworthinessSuggestion(
+async function generateTrustworthinessSuggestionFromMeetings(
   recordId: string,
-  participantEmail: string,
-  activeSessionEmail: string | undefined,
-  explicitRange: DateRangeLiteral,
+  meetings: CoachingEvidenceMeeting[],
   emitStage?: TrustworthinessSuggestionStageEmitter
 ) {
-  await emitStage?.("fetching_airtable_meetings");
-  const records = await fetchCoachingInputLogRecordsForContext(
-    participantEmail,
-    activeSessionEmail,
-    explicitRange
-  );
-  await emitStage?.("building_meeting_evidence");
-  const meetings = records.map(createCoachingEvidenceMeeting).filter(hasEvidenceText);
-
-  if (records.length === 0) {
-    throw new Error("No hay reuniones suficientes para sugerir TW.");
-  }
-
-  if (meetings.length === 0) {
-    throw new Error("Hay reuniones, pero no hay evidencia textual suficiente.");
-  }
-
   await emitStage?.("sending_context_to_ai");
   const suggestionPayload = await callOpenAIForSuggestion(meetings);
 
@@ -1645,6 +2431,23 @@ export async function createTrustworthinessSuggestion(
   };
 }
 
+export async function createTrustworthinessSuggestion(
+  recordId: string,
+  participantEmail: string,
+  activeSessionEmail: string | undefined,
+  explicitRange: DateRangeLiteral,
+  emitStage?: TrustworthinessSuggestionStageEmitter
+) {
+  const meetings = await prepareTrustworthinessSuggestionContext(
+    participantEmail,
+    activeSessionEmail,
+    explicitRange,
+    emitStage
+  );
+
+  return generateTrustworthinessSuggestionFromMeetings(recordId, meetings, emitStage);
+}
+
 export async function createTrustworthinessFeedback(
   recordId: string,
   evaluatorEmail: string,
@@ -1672,4 +2475,55 @@ export async function createTrustworthinessFeedback(
   }
 
   return callOpenAIForFeedback(input);
+}
+
+export async function createTrustworthinessAssistantSession(params: {
+  activeSessionEmail?: string;
+  end: string;
+  evaluatedName: string;
+  evaluatorEmail: string;
+  existingFeedback?: string | null;
+  participantEmail: string;
+  projectContext?: string | null;
+  recordId: string;
+  roleLabel?: string | null;
+  start: string;
+}) {
+  const meetings = await prepareTrustworthinessSuggestionContext(
+    params.participantEmail,
+    params.activeSessionEmail,
+    { end: params.end, start: params.start }
+  );
+  const suggestion = await generateTrustworthinessSuggestionFromMeetings(params.recordId, meetings);
+  const feedback = await createTrustworthinessFeedback(
+    params.recordId,
+    params.evaluatorEmail,
+    createFeedbackInputFromSuggestion({
+      evaluatedName: params.evaluatedName,
+      existingFeedback: params.existingFeedback ?? null,
+      projectContext: params.projectContext ?? null,
+      roleLabel: params.roleLabel ?? null,
+      suggestion
+    })
+  );
+
+  return {
+    meetings: meetings.map(toTrustworthinessAssistantMeeting),
+    proposal: createProposalFromSuggestion(suggestion, feedback),
+    suggestion
+  };
+}
+
+export async function createTrustworthinessAssistantReply(
+  input: TrustworthinessAssistantConversationInput
+) {
+  if (input.prompt.trim().length === 0) {
+    throw new Error("El mensaje del usuario es obligatorio para continuar la conversación.");
+  }
+
+  return callOpenAIForTrustworthinessAssistant({
+    ...input,
+    prompt: input.prompt.trim(),
+    proposal: validateAssistantProposal(input.proposal)
+  });
 }

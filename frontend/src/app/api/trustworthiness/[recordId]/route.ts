@@ -24,6 +24,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       groupThinkingAiJson?: string | null;
       intimacyPoints?: number | null;
       intimacyAiJson?: string | null;
+      ratingStatus?: "Pending" | "Done";
       reliabilityPoints?: number | null;
       reliabilityAiJson?: string | null;
     };
@@ -49,6 +50,9 @@ export async function PATCH(request: Request, context: RouteContext) {
         : {}),
       ...(Object.prototype.hasOwnProperty.call(body, "intimacyAiJson")
         ? { intimacyAiJson: body.intimacyAiJson ?? null }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, "ratingStatus")
+        ? { ratingStatus: body.ratingStatus }
         : {}),
       ...(Object.prototype.hasOwnProperty.call(body, "reliabilityPoints")
         ? { reliabilityPoints: body.reliabilityPoints ?? null }

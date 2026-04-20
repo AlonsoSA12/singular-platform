@@ -20,9 +20,12 @@ import type {
   RecordGroup,
   RecordPeriodGroup,
   RecordSummary,
+  TrustworthinessRatingStatus,
   TrustworthinessRecord,
   TrustworthinessResponse
 } from "./types";
+
+const DETAIL_STATUS_OPTIONS: TrustworthinessRatingStatus[] = ["Pending", "Done"];
 
 type TrustworthinessFiltersProps = {
   isSelectorOpen: boolean;
@@ -243,9 +246,12 @@ export function TrustworthinessRecordsSection(props: TrustworthinessRecordsSecti
                                 <span className="trustworthiness-mobile-label">#</span>
                                 <strong>{recordIndex + 1}</strong>
                                 <button
-                                  aria-label={`Abrir chatbot de evaluación para ${summary.evaluatedName}`}
+                                  aria-label={`Generar TW y abrir chat de revisión para ${summary.evaluatedName}`}
                                   className="trustworthiness-index-action"
-                                  data-tooltip="Abrir chatbot de evaluación"
+                                  data-walkthrough={
+                                    index === 0 && recordIndex === 0 ? "chatbot-entry" : undefined
+                                  }
+                                  data-tooltip="Generar TW y abrir chat de revisión"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     props.onOpenChatbot(record);
@@ -253,7 +259,7 @@ export function TrustworthinessRecordsSection(props: TrustworthinessRecordsSecti
                                   onKeyDown={(event) => {
                                     event.stopPropagation();
                                   }}
-                                  title="Abrir chatbot de evaluación"
+                                  title="Generar TW y abrir chat de revisión"
                                   type="button"
                                 >
                                   <svg viewBox="0 0 24 24">
@@ -360,18 +366,24 @@ type TrustworthinessDetailDrawerProps = {
   coachingContextError: string | null;
   coachingContextResponse: CoachingContextResponse | null;
   drawerWidth: number;
+  hasPendingChanges: boolean;
   isCoachingContextLoading: boolean;
+  isManualSavePending: boolean;
   isSuggestionLoading: boolean;
   onClose: () => void;
   onOpenChatbot: (record: TrustworthinessRecord) => void;
+  onOpenSaveConfirmation: () => void;
   onOpenTranscript: (meetingId: string) => void;
+  onStatusChange: (nextStatus: TrustworthinessRatingStatus) => void;
   onStartResize: () => void;
   onStartSuggestionGeneration: () => void;
+  manualSaveErrorMessage: string | null;
   selectedPeriodIds: string[];
   selectedRecord: TrustworthinessRecord | null;
   selectedRecordGroups: RecordGroup[];
   selectedRecordSummary: RecordSummary | null;
   shellRef: RefObject<HTMLDivElement | null>;
+  statusValue: TrustworthinessRatingStatus;
   suggestionActionLabel: string;
 };
 
@@ -382,6 +394,17 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
 
   const selectedRecord = props.selectedRecord;
   const selectedRecordSummary = props.selectedRecordSummary;
+  const getGroupWalkthroughId = (groupKey: RecordGroup["key"]) => {
+    if (groupKey === "summary") {
+      return "detail-summary";
+    }
+
+    if (groupKey === "scores") {
+      return "detail-trustworthiness";
+    }
+
+    return undefined;
+  };
 
   return createPortal(
     <aside
@@ -439,11 +462,11 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
               </svg>
             </button>
             <button
-              aria-label="Abrir chatbot"
+              aria-label="Generar TW y abrir chat de revisión"
               className="trustworthiness-detail-icon-action"
-              data-tooltip="Abrir chatbot"
+              data-tooltip="Generar TW y abrir chat de revisión"
               onClick={() => props.onOpenChatbot(selectedRecord)}
-              title="Chatbot"
+              title="Generar TW y abrir chat de revisión"
               type="button"
             >
               <svg viewBox="0 0 24 24">
@@ -460,14 +483,34 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
           </div>
         </div>
 
-        <div className="trustworthiness-detail-meta">
+        <div className="trustworthiness-detail-meta" data-walkthrough="detail-snapshot">
           <div>
             <span>Trustworthiness</span>
             <strong>{selectedRecordSummary.scoreLabel}</strong>
           </div>
-          <div>
+          <div className="trustworthiness-detail-meta-status" data-walkthrough="detail-status">
             <span>Estado</span>
-            <strong>{selectedRecordSummary.status}</strong>
+            <label className="trustworthiness-detail-status-control">
+              <select
+                className="trustworthiness-detail-status-select"
+                disabled={props.isManualSavePending}
+                onChange={(event) => props.onStatusChange(event.target.value as TrustworthinessRatingStatus)}
+                value={props.statusValue}
+              >
+                {DETAIL_STATUS_OPTIONS.map((statusOption) => (
+                  <option key={statusOption} value={statusOption}>
+                    {statusOption}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {props.isManualSavePending ? (
+              <small className="trustworthiness-detail-status-hint">Guardando evaluación...</small>
+            ) : (
+              <small className="trustworthiness-detail-status-hint">
+                El cambio de estado se confirma al guardar.
+              </small>
+            )}
           </div>
           <div>
             <span>Periodo</span>
@@ -479,10 +522,31 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
           </div>
         </div>
 
+        {props.hasPendingChanges ? (
+          <section className="trustworthiness-detail-save-bar" data-walkthrough="detail-save">
+            <div className="trustworthiness-detail-save-copy">
+              <strong>Cambios pendientes</strong>
+              <p>Puntajes, feedback y estado se confirman juntos al final.</p>
+              {props.manualSaveErrorMessage ? (
+                <small className="trustworthiness-detail-save-error">{props.manualSaveErrorMessage}</small>
+              ) : null}
+            </div>
+            <button
+              className="detail-card-action detail-card-action-primary"
+              disabled={props.isManualSavePending}
+              onClick={props.onOpenSaveConfirmation}
+              type="button"
+            >
+              {props.isManualSavePending ? "Guardando..." : "Guardar evaluación"}
+            </button>
+          </section>
+        ) : null}
+
         <div className="trustworthiness-detail-groups" data-walkthrough="detail-groups">
           {props.selectedRecordGroups.map((group) => (
             <section
               className={`trustworthiness-group trustworthiness-group-${group.key}`}
+              data-walkthrough={getGroupWalkthroughId(group.key)}
               key={`${selectedRecord.id}-${group.key}`}
             >
               <div className="trustworthiness-group-header">
@@ -491,7 +555,11 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
               </div>
               <div className="trustworthiness-group-grid">
                 {group.fields.map((field) => (
-                  <div className="trustworthiness-field" key={`${selectedRecord.id}-${field.name}`}>
+                  <div
+                    className="trustworthiness-field"
+                    data-walkthrough={field.walkthroughId}
+                    key={`${selectedRecord.id}-${field.name}`}
+                  >
                     <dt>{field.name}</dt>
                     <dd>{renderValue(field.value)}</dd>
                   </div>
@@ -522,7 +590,7 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
               </span>
             </div>
 
-            <div className="trustworthiness-context-panel">
+            <div className="trustworthiness-context-panel" data-walkthrough="detail-transcript">
               <div className="trustworthiness-context-summary">
                 <strong>
                   {props.coachingContextResponse
@@ -610,6 +678,127 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
         </div>
       </div>
     </aside>,
+    document.body
+  );
+}
+
+type TrustworthinessSaveConfirmationModalProps = {
+  description: string;
+  discardLabel?: string;
+  doneLabel?: string;
+  draftLabel?: string;
+  errorMessage?: string | null;
+  eyebrow: string;
+  isOpen: boolean;
+  isSaving: boolean;
+  onClose: () => void;
+  onDiscard: () => void;
+  onSaveAsDone: () => void;
+  onSaveAsDraft: () => void;
+  savingStatus: TrustworthinessRatingStatus | null;
+  selectedStatus: TrustworthinessRatingStatus;
+  summaryBadges: string[];
+  title: string;
+  walkthroughId?: string;
+  zIndex: number;
+};
+
+export function TrustworthinessSaveConfirmationModal(
+  props: TrustworthinessSaveConfirmationModalProps
+) {
+  if (!props.isOpen || typeof document === "undefined") {
+    return null;
+  }
+
+  const selectedStatusLabel =
+    props.selectedStatus === "Done" ? "Done" : "Draft (se guarda como Pending)";
+
+  return createPortal(
+    <div
+      className="trustworthiness-chatbot-confirm-backdrop"
+      onClick={() => {
+        if (!props.isSaving) {
+          props.onClose();
+        }
+      }}
+      style={{ zIndex: props.zIndex }}
+    >
+      <div
+        aria-label={props.title}
+        aria-modal="true"
+        className="trustworthiness-chatbot-confirm-modal"
+        data-walkthrough={props.walkthroughId}
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+        role="dialog"
+      >
+        <div className="trustworthiness-chatbot-confirm-copy">
+          <span>{props.eyebrow}</span>
+          <h4>{props.title}</h4>
+          <p>{props.description}</p>
+        </div>
+
+        <div className="trustworthiness-chatbot-confirm-summary">
+          {props.summaryBadges.map((badge) => (
+            <span key={badge}>{badge}</span>
+          ))}
+        </div>
+
+        <div className="trustworthiness-chatbot-confirm-selection">
+          <span>Selección actual</span>
+          <strong>{selectedStatusLabel}</strong>
+          <small>El botón que elijas a continuación es el estado que realmente se guardará.</small>
+        </div>
+
+        {props.errorMessage ? (
+          <p className="trustworthiness-chatbot-confirm-error">{props.errorMessage}</p>
+        ) : null}
+
+        <div className="trustworthiness-chatbot-confirm-actions is-multi">
+          <button
+            className="trustworthiness-chatbot-secondary"
+            disabled={props.isSaving}
+            onClick={props.onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <button
+            className="trustworthiness-chatbot-secondary is-danger"
+            disabled={props.isSaving}
+            onClick={props.onDiscard}
+            type="button"
+          >
+            {props.discardLabel ?? "Discard"}
+          </button>
+          <button
+            className={`trustworthiness-chatbot-confirm-option ${
+              props.selectedStatus === "Pending" ? "is-selected" : ""
+            }`}
+            disabled={props.isSaving}
+            onClick={props.onSaveAsDraft}
+            type="button"
+          >
+            {props.isSaving && props.savingStatus === "Pending"
+              ? "Guardando draft..."
+              : props.draftLabel ?? "Guardar como Draft"}
+          </button>
+          <button
+            className={`trustworthiness-chatbot-confirm-primary ${
+              props.selectedStatus === "Done" ? "is-selected" : ""
+            }`}
+            disabled={props.isSaving}
+            onClick={props.onSaveAsDone}
+            type="button"
+          >
+            {props.isSaving && props.savingStatus === "Done"
+              ? "Guardando done..."
+              : props.doneLabel ?? "Guardar como Done"}
+          </button>
+        </div>
+      </div>
+    </div>,
     document.body
   );
 }

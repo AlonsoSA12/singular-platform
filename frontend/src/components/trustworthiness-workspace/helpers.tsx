@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 
 import type {
   CachedTwSuggestion,
-  ChatbotSuggestion,
   CoachingContextRecord,
   DetailGroupsOptions,
   DetailPerson,
@@ -24,6 +23,7 @@ import type {
   SuggestionAppliedPoints,
   SuggestionConfidence,
   SuggestionPillarKey,
+  TrustworthinessAssistantProposal,
   TrustworthinessDraft,
   TrustworthinessRecord,
   TwGenerationProgress,
@@ -69,6 +69,7 @@ const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
 
 export const PERIOD_SELECTION_STORAGE_KEY = "singular-platform-trustworthiness-periods";
 export const DETAIL_DRAWER_WIDTH_STORAGE_KEY = "singular-platform-trustworthiness-detail-width";
+export const CHAT_REVIEW_WIDTH_STORAGE_KEY = "singular-platform-trustworthiness-chat-width";
 const TW_SUGGESTION_CACHE_KEY_PREFIX = "singular-platform-trustworthiness-suggestion";
 const TW_SUGGESTION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_STATUS_FILTERS = ["Pending"];
@@ -450,100 +451,86 @@ export function createDraftFromRecord(record: TrustworthinessRecord): Trustworth
   };
 }
 
+export function getTrustworthinessRecordCoverage(
+  record: TrustworthinessRecord
+): SelectedPeriodCoverage | null {
+  const start = getStringValue(record.fields, "Start Date Range");
+  const end = getStringValue(record.fields, "End Date Range");
+
+  if (!start || !end) {
+    return null;
+  }
+
+  return { end, start };
+}
+
 export function isPendingRecord(record: TrustworthinessRecord) {
   return normalizeStatusValue(getRecordStatus(record)) === "pending";
 }
 
-export function createChatbotGreeting(record: TrustworthinessRecord) {
-  const summary = getRecordSummary(record);
-  const role = summary.roleLabel !== "Sin rol" ? summary.roleLabel : "rol pendiente";
-  const context = summary.context !== "Sin contexto" ? summary.context : "sin contexto asignado";
+export function calculateTrustworthinessScoreFromProposal(
+  proposal: TrustworthinessAssistantProposal
+) {
+  return (
+    proposal.credibilityPoints +
+    proposal.reliabilityPoints +
+    proposal.intimacyPoints * 2 +
+    proposal.groupThinkingPoints * 2
+  ) / 60;
+}
+
+export function getTrustworthinessMeaningFromScore(score: number) {
+  if (score >= 0.8) {
+    return "Excellence in Trust";
+  }
+
+  if (score >= 0.6) {
+    return "High Trust";
+  }
+
+  if (score >= 0.4) {
+    return "Moderate Trust";
+  }
+
+  if (score >= 0.2) {
+    return "Basic Trust";
+  }
+
+  return "Initial Trust Development";
+}
+
+export function formatTrustworthinessPercentageFromProposal(
+  proposal: TrustworthinessAssistantProposal
+) {
+  return `${Math.round(calculateTrustworthinessScoreFromProposal(proposal) * 100)}%`;
+}
+
+export function createTrustworthinessAssistantWelcomeMessage(params: {
+  evaluatedName: string;
+  meetingsUsed: number;
+  proposal: TrustworthinessAssistantProposal;
+}) {
+  const percentage = formatTrustworthinessPercentageFromProposal(params.proposal);
 
   return [
-    `Hola. Estoy contigo para aterrizar la evaluación de ${summary.evaluatedName}.`,
-    `Rol evaluado: ${role}.`,
-    `Contexto: ${context}.`,
-    "Puedo ayudarte a ordenar evidencia, proponer una narrativa más clara y traducir observaciones a los cuatro pilares de Trustworthiness."
+    `Ya preparé una propuesta inicial para ${params.evaluatedName} usando ${params.meetingsUsed} reuniones con evidencia útil.`,
+    `TW sugerido: ${percentage}. Revisa los cuatro pilares y el feedback general que te dejé arriba.`,
+    "¿Te parece bien y la guardamos, o quieres conversar un pilar específico o el feedback general antes de guardar?"
   ].join("\n");
 }
 
-export function createChatbotReply(record: TrustworthinessRecord, prompt: string) {
-  const summary = getRecordSummary(record);
-  const lowerPrompt = prompt.toLowerCase();
-  const positiveSignals = [
-    "bien",
-    "excelente",
-    "fuerte",
-    "confiable",
-    "claro",
-    "lider",
-    "liderazgo",
-    "apoyo",
-    "colabor"
-  ];
-  const cautionSignals = [
-    "bloqueo",
-    "retraso",
-    "duda",
-    "débil",
-    "debil",
-    "error",
-    "falta",
-    "riesgo",
-    "conflicto"
-  ];
-  const positiveScore = positiveSignals.filter((word) => lowerPrompt.includes(word)).length;
-  const cautionScore = cautionSignals.filter((word) => lowerPrompt.includes(word)).length;
-  const tone =
-    positiveScore > cautionScore
-      ? "Suena a una evaluación con señales bastante favorables."
-      : cautionScore > positiveScore
-        ? "Aquí ya veo alertas claras que conviene dejar bien sustentadas."
-        : "Lo que describes se siente mixto: hay valor, pero también fricción.";
-  const strengthsHint = summary.strengths ? `Fortaleza actual detectada: ${summary.strengths}.` : "";
-  const weaknessHint = summary.weaknesses ? `Debilidad actual detectada: ${summary.weaknesses}.` : "";
-
-  return [
-    `Gracias, ya tengo mejor contexto sobre ${summary.evaluatedName}.`,
-    tone,
-    strengthsHint,
-    weaknessHint,
-    "Yo lo ordenaría así:",
-    "1. Reliability: qué pasó con compromisos, tiempos y consistencia.",
-    "2. Intimacy: cómo se relacionó con cliente o equipo y qué tan bien entendió el contexto.",
-    "3. Group Thinking: qué tan colaborativo fue y cómo priorizó el bien común.",
-    "4. Credibility: qué tanto criterio, dominio y confianza transmitió.",
-    "Si quieres, pídeme algo puntual como: \"dame una narrativa final\", \"sugiéreme estrellas por pilar\" o \"resume solo los riesgos\"."
-  ]
-    .filter((line) => line.length > 0)
-    .join("\n");
+export function getTrustworthinessAssistantSavePrompt() {
+  return "Sí, está bien. Continuemos y guarda esta propuesta.";
 }
 
-export function createChatbotSuggestions(record: TrustworthinessRecord): ChatbotSuggestion[] {
-  const summary = getRecordSummary(record);
+export function getTrustworthinessAssistantFocusPrompt(
+  focus: SuggestionPillarKey | "feedback"
+) {
+  if (focus === "feedback") {
+    return "Quiero revisar y ajustar el feedback general antes de guardar.";
+  }
 
-  return [
-    {
-      id: "summary",
-      label: "Resumen ejecutivo",
-      prompt: `Hazme un resumen ejecutivo del desempeño de ${summary.evaluatedName} para esta evaluación.`
-    },
-    {
-      id: "narrative",
-      label: "Narrativa final",
-      prompt: `Ayúdame a redactar una narrativa final para ${summary.evaluatedName} con un tono claro, profesional y humano.`
-    },
-    {
-      id: "scores",
-      label: "Sugerir estrellas",
-      prompt: `Sugiéreme cómo pensar las estrellas de Reliability, Intimacy, Group Thinking y Credibility para ${summary.evaluatedName}.`
-    },
-    {
-      id: "risks",
-      label: "Riesgos y alertas",
-      prompt: `Identifica riesgos, alertas o señales débiles que debería considerar antes de guardar la evaluación de ${summary.evaluatedName}.`
-    }
-  ];
+  return `Quiero revisar ${getPillarLabel(focus)}. Explícame la evidencia y ajusta la propuesta si hace falta.`;
 }
 
 export function getCoachingUniqueKey(record: CoachingContextRecord) {
@@ -991,12 +978,9 @@ function ScoreDetailCard(props: {
   aiSuggestion?: PillarSuggestion | null;
   dirty: boolean;
   editable: boolean;
-  errorMessage: string | null;
-  isSaving: boolean;
   meaning: unknown;
   onChange?: (value: number) => void;
   onDiscard?: () => void;
-  onSave?: () => void;
   points: unknown;
   question: unknown;
   value: number | null;
@@ -1190,25 +1174,16 @@ function ScoreDetailCard(props: {
         </div>
       </div>
 
-      {props.editable && props.dirty && props.onSave && props.onDiscard ? (
+      {props.editable && props.dirty && props.onDiscard ? (
         <div className="detail-card-actions">
           <button
             className="detail-card-action detail-card-action-secondary"
-            disabled={props.isSaving}
             onClick={props.onDiscard}
             type="button"
           >
             Discard
           </button>
-          <button
-            className="detail-card-action detail-card-action-primary"
-            disabled={props.isSaving}
-            onClick={props.onSave}
-            type="button"
-          >
-            {props.isSaving ? "Saving..." : "Save"}
-          </button>
-          {props.errorMessage ? <span className="detail-card-error">{props.errorMessage}</span> : null}
+          <span className="detail-score-note">Cambio pendiente. Guarda la evaluación al final.</span>
         </div>
       ) : null}
     </div>
@@ -1318,14 +1293,9 @@ export function buildDetailGroups(record: TrustworthinessRecord, options: Detail
               aiSuggestion={options.aiSuggestions[scoreField.draftField] ?? null}
               dirty={options.isDirty(scoreField.draftField)}
               editable={options.editable}
-              errorMessage={
-                options.errorTarget === scoreField.draftField ? options.errorMessage : null
-              }
-              isSaving={options.isSaving(scoreField.draftField)}
               meaning={fields[scoreField.meaningField]}
               onChange={(value) => options.onPointsChange(scoreField.draftField, value)}
               onDiscard={() => options.onDiscard(scoreField.draftField)}
-              onSave={() => options.onSave(scoreField.draftField)}
               points={options.draft ? options.draft[scoreField.draftField] : fields[scoreField.pointsField]}
               question={fields[scoreField.questionField]}
               value={
@@ -1350,6 +1320,7 @@ export function buildDetailGroups(record: TrustworthinessRecord, options: Detail
       label: "Narrativa",
       fields: [{
         name: "Feedback",
+        walkthroughId: "detail-feedback",
         value: options.editable ? (
           <div className="trustworthiness-feedback-card">
             <div className="trustworthiness-feedback-toolbar">
@@ -1375,23 +1346,13 @@ export function buildDetailGroups(record: TrustworthinessRecord, options: Detail
               <div className="detail-card-actions">
                 <button
                   className="detail-card-action detail-card-action-secondary"
-                  disabled={options.isSaving("feedback")}
+                  disabled={!options.isDirty("feedback")}
                   onClick={() => options.onDiscard("feedback")}
                   type="button"
                 >
                   Discard
                 </button>
-                <button
-                  className="detail-card-action detail-card-action-primary"
-                  disabled={options.isSaving("feedback")}
-                  onClick={() => options.onSave("feedback")}
-                  type="button"
-                >
-                  {options.isSaving("feedback") ? "Saving..." : "Save"}
-                </button>
-                {options.errorTarget === "feedback" && options.errorMessage ? (
-                  <span className="detail-card-error">{options.errorMessage}</span>
-                ) : null}
+                <span className="detail-score-note">Cambio pendiente. Guarda la evaluación al final.</span>
               </div>
             ) : null}
           </div>
@@ -2009,7 +1970,12 @@ export function TwGenerationStatusCard({
 }
 
 export const WALKTHROUGH_DETAIL_STEP_IDS = new Set([
-  "detail-actions",
-  "detail-sections",
-  "detail-meetings"
+  "detail-snapshot",
+  "detail-status",
+  "detail-summary",
+  "detail-meetings",
+  "detail-transcript",
+  "detail-trustworthiness",
+  "detail-feedback",
+  "detail-save"
 ]);

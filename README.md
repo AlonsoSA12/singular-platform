@@ -53,6 +53,12 @@ Proyectos previstos:
 - `singular-platform-web`
 - `singular-platform-api`
 
-URL fija esperada para la rama `development` del frontend:
+Guia de deployments y ambientes:
 
-`https://singular-platform-web-git-development-singular-projects-f4874352.vercel.app`
+- [docs/deployments-and-environments.md](/Users/alonsosantamaria/Documents/SS Arquitecture/docs/deployments-and-environments.md)
+
+Estrategia objetivo de ramas y ambientes:
+
+- `development` -> ambiente remoto `dev`
+- `preview` -> ambiente `Preview` estable para QA
+- `main` -> `Production` cuando se habilite ese flujo
