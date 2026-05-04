@@ -80,7 +80,8 @@ function isIdleTwGenerationProgress(progress: TwGenerationProgress) {
     progress.currentStage === null &&
     progress.errorMessage === null &&
     progress.errorStage === null &&
-    progress.completedStages.length === 0
+    progress.completedStages.length === 0 &&
+    progress.decisionTrace.length === 0
   );
 }
 
@@ -140,7 +141,7 @@ function getGenerationStageToastMessage(stage: TwGenerationStage) {
   const baseLabel = getGenerationStageLabel(stage);
 
   if (stage === "sending_context_to_ai") {
-    return `Paso ${stepIndex + 1} de ${TW_GENERATION_STEPS.length}: ${baseLabel}. Esto puede tardar unos segundos.`;
+    return `Paso ${stepIndex + 1} de ${TW_GENERATION_STEPS.length}: ${baseLabel}. La IA está comparando señales por pilar.`;
   }
 
   return `Paso ${stepIndex + 1} de ${TW_GENERATION_STEPS.length}: ${baseLabel}.`;
@@ -754,6 +755,7 @@ export function TrustworthinessWorkspace({
   const [manualSaveErrorMessage, setManualSaveErrorMessage] = useState<string | null>(null);
   const [manualSavingStatus, setManualSavingStatus] = useState<TrustworthinessRatingStatus | null>(null);
   const [feedbackGenerationError, setFeedbackGenerationError] = useState<string | null>(null);
+  const [feedbackRequiredError, setFeedbackRequiredError] = useState<string | null>(null);
   const [isFeedbackGenerating, setIsFeedbackGenerating] = useState(false);
   const [chatbotRecordId, setChatbotRecordId] = useState<string | null>(null);
   const [isChatContextPanelOpen, setIsChatContextPanelOpen] = useState(false);
@@ -1007,6 +1009,7 @@ export function TrustworthinessWorkspace({
     if (!selectedRecordId || !responsePayload) {
       setDraftRecord(null);
       setFeedbackGenerationError(null);
+      setFeedbackRequiredError(null);
       setIsFeedbackGenerating(false);
       setIsManualSaveConfirmationOpen(false);
       setIsManualSaving(false);
@@ -1021,6 +1024,7 @@ export function TrustworthinessWorkspace({
     if (!activeRecord || !isPendingRecord(activeRecord)) {
       setDraftRecord(null);
       setFeedbackGenerationError(null);
+      setFeedbackRequiredError(null);
       setIsFeedbackGenerating(false);
       setStatusValue(activeRecord ? getEditableRatingStatus(getRecordStatus(activeRecord)) : "Pending");
       setIsManualSaveConfirmationOpen(false);
@@ -1033,6 +1037,7 @@ export function TrustworthinessWorkspace({
     setDraftRecord(createDraftFromRecord(activeRecord));
     setStatusValue(getEditableRatingStatus(getRecordStatus(activeRecord)));
     setFeedbackGenerationError(null);
+    setFeedbackRequiredError(null);
     setIsFeedbackGenerating(false);
     setIsManualSaveConfirmationOpen(false);
     setIsManualSaving(false);
@@ -1418,6 +1423,7 @@ export function TrustworthinessWorkspace({
 
   function handleDraftFeedbackChange(value: string) {
     setFeedbackGenerationError(null);
+    setFeedbackRequiredError(null);
     setManualSaveErrorMessage(null);
     setDraftRecord((current) =>
       current
@@ -1849,6 +1855,7 @@ export function TrustworthinessWorkspace({
         draft: draftRecord,
         editable: selectedRecordIsPending,
         feedbackGenerationError,
+        feedbackRequiredError,
         isDirty: isTargetDirty,
         isGeneratingFeedback: isFeedbackGenerating,
         onDiscard: handleDiscardTarget,
@@ -2323,6 +2330,7 @@ export function TrustworthinessWorkspace({
     setDraftRecord(selectedRecordIsPending ? createDraftFromRecord(selectedRecord) : null);
     setStatusValue(getEditableRatingStatus(getRecordStatus(selectedRecord)));
     setFeedbackGenerationError(null);
+    setFeedbackRequiredError(null);
     setManualSaveErrorMessage(null);
     setManualSavingStatus(null);
     setIsManualSaveConfirmationOpen(false);
@@ -2429,6 +2437,7 @@ export function TrustworthinessWorkspace({
     );
     if (target === "feedback") {
       setFeedbackGenerationError(null);
+      setFeedbackRequiredError(null);
     }
     setManualSaveErrorMessage(null);
   }
@@ -2446,6 +2455,23 @@ export function TrustworthinessWorkspace({
       openChatOnSuccess: true,
       record
     });
+  }
+
+  function focusFeedbackRequirement() {
+    const feedbackField = detailShellRef.current?.querySelector<HTMLElement>(
+      '[data-walkthrough="detail-feedback"]'
+    );
+
+    feedbackField?.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+
+    window.setTimeout(() => {
+      feedbackField
+        ?.querySelector<HTMLTextAreaElement>(".trustworthiness-feedback-editor")
+        ?.focus();
+    }, 280);
   }
 
   function closeChatbot() {
@@ -2486,6 +2512,19 @@ export function TrustworthinessWorkspace({
       input.start,
       input.end
     ].join("|");
+
+    if (chatbotCoachingContextKey === contextKey && chatbotCoachingContextResponse) {
+      lastChatbotCoachingContextKeyRef.current = contextKey;
+      return chatbotCoachingContextResponse;
+    }
+
+    if (coachingContextKey === contextKey && coachingContextResponse) {
+      lastChatbotCoachingContextKeyRef.current = contextKey;
+      setIsChatbotCoachingContextLoading(false);
+      setChatbotCoachingContextError(null);
+      setChatbotCoachingContextResponse(coachingContextResponse);
+      return coachingContextResponse;
+    }
 
     lastChatbotCoachingContextKeyRef.current = contextKey;
     setIsChatbotCoachingContextLoading(true);
@@ -2554,6 +2593,7 @@ export function TrustworthinessWorkspace({
       const message = "No hay contexto suficiente para generar la sugerencia TW.";
       setSuggestionError(message);
       setTwGenerationProgress({
+        decisionTrace: [],
         completedStages: [],
         currentStage: null,
         errorMessage: message,
@@ -2609,13 +2649,14 @@ export function TrustworthinessWorkspace({
         return;
       }
 
-      setTwGenerationProgress({
+      setTwGenerationProgress((current) => ({
+        decisionTrace: current.decisionTrace,
         completedStages: getGenerationCompletedStages(stage),
         currentStage: stage,
         errorMessage: null,
         errorStage: null,
         status: "running"
-      });
+      }));
       upsertGenerationToast(
         "progress",
         "Generando sugerencia TW",
@@ -2632,6 +2673,7 @@ export function TrustworthinessWorkspace({
       setTwSuggestion(null);
       setSuggestionError(message);
       setTwGenerationProgress({
+        decisionTrace: [],
         completedStages: getGenerationCompletedStages(errorStage),
         currentStage: errorStage,
         errorMessage: message,
@@ -2670,6 +2712,7 @@ export function TrustworthinessWorkspace({
       setTwSuggestion(suggestion);
       setSelectedSuggestionPillar(null);
       setTwGenerationProgress({
+        decisionTrace: [],
         completedStages: TW_GENERATION_STEPS.map((step) => step.id),
         currentStage: null,
         errorMessage: null,
@@ -2767,6 +2810,10 @@ export function TrustworthinessWorkspace({
         {
           body: JSON.stringify({
             end: targetPeriodCoverage.end,
+            existingFeedback:
+              targetRecord.id === selectedRecord?.id && draftRecord?.feedback.trim()
+                ? draftRecord.feedback.trim()
+                : createDraftFromRecord(targetRecord).feedback.trim(),
             participantEmail: targetParticipantEmail,
             start: targetPeriodCoverage.start
           }),
@@ -2822,6 +2869,14 @@ export function TrustworthinessWorkspace({
             continue;
           }
 
+          if (parsedEvent.type === "decision_trace_delta") {
+            setTwGenerationProgress((current) => ({
+              ...current,
+              decisionTrace: [...current.decisionTrace, parsedEvent.delta].slice(-5)
+            }));
+            continue;
+          }
+
           if (parsedEvent.type === "stage") {
             applyStage(parsedEvent.stage);
             continue;
@@ -2844,7 +2899,12 @@ export function TrustworthinessWorkspace({
         const parsedEvent = JSON.parse(trailingLine) as unknown;
 
         if (isTwSuggestionStreamEvent(parsedEvent)) {
-          if (parsedEvent.type === "stage") {
+          if (parsedEvent.type === "decision_trace_delta") {
+            setTwGenerationProgress((current) => ({
+              ...current,
+              decisionTrace: [...current.decisionTrace, parsedEvent.delta].slice(-5)
+            }));
+          } else if (parsedEvent.type === "stage") {
             applyStage(parsedEvent.stage);
           } else if (parsedEvent.type === "error") {
             receivedTerminalEvent = true;
@@ -2874,10 +2934,18 @@ export function TrustworthinessWorkspace({
   }
 
   function startSuggestionGeneration() {
-    detailShellRef.current?.scrollTo({
-      behavior: "smooth",
-      top: 0
-    });
+    const activeDraft = selectedRecord ? draftRecord ?? createDraftFromRecord(selectedRecord) : null;
+    const activeFeedback = activeDraft?.feedback.trim() ?? "";
+
+    if (activeFeedback.length === 0) {
+      const message = "Completa el feedback antes de generar la sugerencia TW.";
+      setFeedbackRequiredError(message);
+      setSuggestionError(message);
+      focusFeedbackRequirement();
+      return;
+    }
+
+    setFeedbackRequiredError(null);
     void generateTwSuggestion();
   }
 
@@ -3030,6 +3098,8 @@ export function TrustworthinessWorkspace({
         periodGroups={periodGroups}
         responsePayload={responsePayload}
         selectedRecordId={selectedRecordId}
+        walkthroughStepId={walkthroughStepId}
+        walkthroughVariant={walkthroughVariant}
       />
 
       <TrustworthinessDetailDrawer

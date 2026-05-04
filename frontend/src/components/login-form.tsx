@@ -44,35 +44,38 @@ export function LoginForm() {
   }
 
   return (
-    <form className="login-panel" onSubmit={handleSubmit}>
-      <div className="login-badge">Singular Platform</div>
-      <div className="login-copy">
-        <p className="eyebrow">Access Gate</p>
-        <h1>Trustworthiness starts with a controlled entry point.</h1>
-        <p>
-          Esta demo valida el email contra Airtable desde el backend y abre un espacio
-          inicial de trabajo para el usuario autorizado.
-        </p>
+    <form className="ss-login-card" onSubmit={handleSubmit}>
+      <div className="ss-login-card-content">
+        <div className="ss-login-card-copy">
+          <h2>Sign in to your account</h2>
+          <p>Great to see you again</p>
+        </div>
+
+        <div className="ss-login-form-fields">
+          <label className="ss-login-field" htmlFor="email">
+            <span>Email address</span>
+            <input
+              autoComplete="email"
+              className="ss-login-input"
+              id="email"
+              name="email"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@company.com"
+              type="email"
+              value={email}
+            />
+          </label>
+
+          {error ? <p className="ss-login-error">{error}</p> : null}
+
+          <button className="ss-login-submit" disabled={isPending || !email.trim()} type="submit">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M7 10V8a5 5 0 0 1 10 0v2h.5A2.5 2.5 0 0 1 20 12.5v6A2.5 2.5 0 0 1 17.5 21h-11A2.5 2.5 0 0 1 4 18.5v-6A2.5 2.5 0 0 1 6.5 10H7Zm2 0h6V8a3 3 0 0 0-6 0v2Zm3 4a1.25 1.25 0 0 0-.75 2.25V18a.75.75 0 0 0 1.5 0v-1.75A1.25 1.25 0 0 0 12 14Z" />
+            </svg>
+            {isPending ? "Validando..." : "Next"}
+          </button>
+        </div>
       </div>
-
-      <label className="field">
-        <span>Email</span>
-        <input
-          autoComplete="email"
-          className="field-input"
-          name="email"
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="tu@email.com"
-          type="email"
-          value={email}
-        />
-      </label>
-
-      {error ? <p className="form-error">{error}</p> : null}
-
-      <button className="primary-button" disabled={isPending} type="submit">
-        {isPending ? "Validando..." : "Ingresar"}
-      </button>
     </form>
   );
 }

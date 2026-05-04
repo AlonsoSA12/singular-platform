@@ -22,7 +22,8 @@ import type {
   RecordSummary,
   TrustworthinessRatingStatus,
   TrustworthinessRecord,
-  TrustworthinessResponse
+  TrustworthinessResponse,
+  WalkthroughVariant
 } from "./types";
 
 const DETAIL_STATUS_OPTIONS: TrustworthinessRatingStatus[] = ["Pending", "Done"];
@@ -156,9 +157,14 @@ type TrustworthinessRecordsSectionProps = {
   periodGroups: RecordPeriodGroup[];
   responsePayload: TrustworthinessResponse | null;
   selectedRecordId: string | null;
+  walkthroughStepId?: string | null;
+  walkthroughVariant?: WalkthroughVariant | null;
 };
 
 export function TrustworthinessRecordsSection(props: TrustworthinessRecordsSectionProps) {
+  const isChatbotEntryWalkthroughActive =
+    props.walkthroughVariant === "chatbot" && props.walkthroughStepId === "chatbot-entry";
+
   return (
     <section className={`trustworthiness-data ${props.filteredRecords.length === 0 ? "is-empty" : ""}`}>
       <div className="trustworthiness-data-header">
@@ -223,7 +229,9 @@ export function TrustworthinessRecordsSection(props: TrustworthinessRecordsSecti
                     <div className="trustworthiness-table-body">
                       {periodGroup.records.map((record, recordIndex) => {
                         const summary = getRecordSummary(record);
-                        const isSelected = record.id === props.selectedRecordId;
+                        const isWalkthroughTarget =
+                          index === 0 && recordIndex === 0 && isChatbotEntryWalkthroughActive;
+                        const isSelected = record.id === props.selectedRecordId || isWalkthroughTarget;
 
                         return (
                           <article
@@ -232,6 +240,9 @@ export function TrustworthinessRecordsSection(props: TrustworthinessRecordsSecti
                           >
                             <div
                               className="trustworthiness-record-summary"
+                              data-walkthrough={
+                                index === 0 && recordIndex === 0 ? "chatbot-entry-row" : undefined
+                              }
                               onClick={() => props.onSelectRecord(record.id)}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
@@ -247,7 +258,9 @@ export function TrustworthinessRecordsSection(props: TrustworthinessRecordsSecti
                                 <strong>{recordIndex + 1}</strong>
                                 <button
                                   aria-label={`Generar TW y abrir chat de revisión para ${summary.evaluatedName}`}
-                                  className="trustworthiness-index-action"
+                                  className={`trustworthiness-index-action ${
+                                    isWalkthroughTarget ? "is-walkthrough-active" : ""
+                                  }`}
                                   data-walkthrough={
                                     index === 0 && recordIndex === 0 ? "chatbot-entry" : undefined
                                   }
@@ -683,20 +696,28 @@ export function TrustworthinessDetailDrawer(props: TrustworthinessDetailDrawerPr
 }
 
 type TrustworthinessSaveConfirmationModalProps = {
+  closeTooltip?: string;
   description: string;
   discardLabel?: string;
+  discardTooltip?: string;
   doneLabel?: string;
+  doneTooltip?: string;
   draftLabel?: string;
+  draftTooltip?: string;
   errorMessage?: string | null;
   eyebrow: string;
+  hideCancelButton?: boolean;
+  hideCurrentSelection?: boolean;
   isOpen: boolean;
   isSaving: boolean;
   onClose: () => void;
+  onDismiss?: () => void;
   onDiscard: () => void;
   onSaveAsDone: () => void;
   onSaveAsDraft: () => void;
   savingStatus: TrustworthinessRatingStatus | null;
   selectedStatus: TrustworthinessRatingStatus;
+  showCloseIcon?: boolean;
   summaryBadges: string[];
   title: string;
   walkthroughId?: string;
@@ -726,13 +747,27 @@ export function TrustworthinessSaveConfirmationModal(
       <div
         aria-label={props.title}
         aria-modal="true"
-        className="trustworthiness-chatbot-confirm-modal"
+        className={`trustworthiness-chatbot-confirm-modal ${props.showCloseIcon ? "has-dismiss-icon" : ""}`}
         data-walkthrough={props.walkthroughId}
         onClick={(event) => {
           event.stopPropagation();
         }}
         role="dialog"
       >
+        {props.showCloseIcon ? (
+          <button
+            aria-label={props.closeTooltip ?? "Cerrar"}
+            className="trustworthiness-chatbot-icon trustworthiness-chatbot-confirm-close"
+            data-tooltip={props.closeTooltip ?? "Cerrar"}
+            onClick={props.onDismiss ?? props.onClose}
+            type="button"
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M6.3 5.3a1 1 0 0 1 1.4 0l4.3 4.29 4.3-4.3a1 1 0 1 1 1.4 1.42L13.42 12l4.3 4.3a1 1 0 0 1-1.42 1.4L12 13.42l-4.3 4.3a1 1 0 0 1-1.4-1.42l4.29-4.3-4.3-4.3a1 1 0 0 1 0-1.4Z" />
+            </svg>
+          </button>
+        ) : null}
+
         <div className="trustworthiness-chatbot-confirm-copy">
           <span>{props.eyebrow}</span>
           <h4>{props.title}</h4>
@@ -745,29 +780,35 @@ export function TrustworthinessSaveConfirmationModal(
           ))}
         </div>
 
-        <div className="trustworthiness-chatbot-confirm-selection">
-          <span>Selección actual</span>
-          <strong>{selectedStatusLabel}</strong>
-          <small>El botón que elijas a continuación es el estado que realmente se guardará.</small>
-        </div>
+        {!props.hideCurrentSelection ? (
+          <div className="trustworthiness-chatbot-confirm-selection">
+            <span>Selección actual</span>
+            <strong>{selectedStatusLabel}</strong>
+            <small>El botón que elijas a continuación es el estado que realmente se guardará.</small>
+          </div>
+        ) : null}
 
         {props.errorMessage ? (
           <p className="trustworthiness-chatbot-confirm-error">{props.errorMessage}</p>
         ) : null}
 
         <div className="trustworthiness-chatbot-confirm-actions is-multi">
-          <button
-            className="trustworthiness-chatbot-secondary"
-            disabled={props.isSaving}
-            onClick={props.onClose}
-            type="button"
-          >
-            Cancelar
-          </button>
+          {!props.hideCancelButton ? (
+            <button
+              className="trustworthiness-chatbot-secondary"
+              disabled={props.isSaving}
+              onClick={props.onClose}
+              type="button"
+            >
+              Cancelar
+            </button>
+          ) : null}
           <button
             className="trustworthiness-chatbot-secondary is-danger"
+            data-tooltip={props.discardTooltip}
             disabled={props.isSaving}
             onClick={props.onDiscard}
+            title={props.discardTooltip}
             type="button"
           >
             {props.discardLabel ?? "Discard"}
@@ -776,8 +817,10 @@ export function TrustworthinessSaveConfirmationModal(
             className={`trustworthiness-chatbot-confirm-option ${
               props.selectedStatus === "Pending" ? "is-selected" : ""
             }`}
+            data-tooltip={props.draftTooltip}
             disabled={props.isSaving}
             onClick={props.onSaveAsDraft}
+            title={props.draftTooltip}
             type="button"
           >
             {props.isSaving && props.savingStatus === "Pending"
@@ -788,8 +831,10 @@ export function TrustworthinessSaveConfirmationModal(
             className={`trustworthiness-chatbot-confirm-primary ${
               props.selectedStatus === "Done" ? "is-selected" : ""
             }`}
+            data-tooltip={props.doneTooltip}
             disabled={props.isSaving}
             onClick={props.onSaveAsDone}
+            title={props.doneTooltip}
             type="button"
           >
             {props.isSaving && props.savingStatus === "Done"

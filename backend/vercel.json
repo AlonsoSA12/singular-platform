@@ -21,12 +21,20 @@
       "destination": "/api/trustworthiness/coaching-context"
     },
     {
+      "source": "/trustworthiness/assistant/config",
+      "destination": "/api/trustworthiness/assistant/config"
+    },
+    {
       "source": "/trustworthiness/:recordId/assistant/session",
       "destination": "/api/trustworthiness/:recordId/assistant/session"
     },
     {
       "source": "/trustworthiness/:recordId/assistant/message",
       "destination": "/api/trustworthiness/:recordId/assistant/message"
+    },
+    {
+      "source": "/trustworthiness/:recordId/assistant/message/stream",
+      "destination": "/api/trustworthiness/:recordId/assistant/message/stream"
     },
     {
       "source": "/trustworthiness/:recordId/assistant/save",
@@ -47,6 +55,42 @@
     {
       "source": "/trustworthiness/:recordId",
       "destination": "/api/trustworthiness/:recordId"
+    },
+    {
+      "source": "/okrs/projects",
+      "destination": "/api/okrs/projects"
+    },
+    {
+      "source": "/okrs/objectives",
+      "destination": "/api/okrs/objectives"
+    },
+    {
+      "source": "/okrs/key-projects",
+      "destination": "/api/okrs/key-projects"
+    },
+    {
+      "source": "/okrs/key-result-history/bulk",
+      "destination": "/api/okrs/key-result-history/bulk"
+    },
+    {
+      "source": "/okrs/key-result-sentiments",
+      "destination": "/api/okrs/key-result-sentiments"
+    },
+    {
+      "source": "/okrs/objective-health-analysis",
+      "destination": "/api/okrs/objective-health-analysis"
+    },
+    {
+      "source": "/okrs/portfolio-analysis",
+      "destination": "/api/okrs/portfolio-analysis"
+    },
+    {
+      "source": "/okrs/ai/objective-draft",
+      "destination": "/api/okrs/ai/objective-draft"
+    },
+    {
+      "source": "/okrs/ai/key-result-draft",
+      "destination": "/api/okrs/ai/key-result-draft"
     }
   ]
 }

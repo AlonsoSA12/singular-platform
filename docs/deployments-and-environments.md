@@ -2,6 +2,12 @@
 
 Estado operativo verificado el 19 de abril de 2026.
 
+Actualizacion de variables IA aplicada el 29 de abril de 2026:
+
+- backend `dev`: `OPENAI_MODEL=gpt-5.4-mini`, `OPENAI_REASONING_EFFORT=low`
+- backend Preview para ramas `preview` y `development`: `OPENAI_MODEL=gpt-5.4-mini`, `OPENAI_REASONING_EFFORT=low`
+- `Production` queda pendiente hasta cerrar el flujo oficial de `main`
+
 Esta guia documenta como vamos a manejar GitHub y Vercel en `Singular Platform` a partir de ahora.
 
 ## Decision actual
@@ -123,6 +129,17 @@ Por decision actual del proyecto:
 - `AIRTABLE_ROLE_FIELD`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `OPENAI_REASONING_EFFORT`
+- `OPENAI_SUGGESTION_MODEL`
+- `OPENAI_ASSISTANT_MODEL`
+- `OPENAI_FEEDBACK_MODEL`
+- `AI_PROVIDER` (`openai` o `deepseek`)
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_MODEL`
+- `DEEPSEEK_SUGGESTION_MODEL`
+- `DEEPSEEK_ASSISTANT_MODEL`
+- `DEEPSEEK_FEEDBACK_MODEL`
+- `DEEPSEEK_BASE_URL`
 - `FRONTEND_URL`
 - `AIRTABLE_BASE_ID_FOR_COACHING`
 - `AIRTABLE_TABLE_NAME_FOR_COACHING_LOGS`
@@ -136,6 +153,8 @@ Por decision actual del proyecto:
 - Backend: `http://localhost:4000`
 - `FRONTEND_URL=http://localhost:3000`
 - `BACKEND_BASE_URL=http://localhost:4000`
+- `OPENAI_MODEL=gpt-5.4-mini`
+- `OPENAI_REASONING_EFFORT=low`
 
 ### Dev remoto
 
@@ -143,11 +162,17 @@ Por decision actual del proyecto:
 - `BACKEND_BASE_URL=https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
 - `BACKEND_PROTECTION_BYPASS_SECRET` vive en el frontend `dev`
 - el backend mantiene su propio Protection Bypass for Automation
+- Backend AI:
+  - `OPENAI_MODEL=gpt-5.4-mini`
+  - `OPENAI_REASONING_EFFORT=low`
 
 ### Preview
 
 - Se definira al cerrar el carril `preview`
 - si alguna variable cambia solo para la rama `preview`, se configura con override especifico de esa rama
+- Backend AI objetivo:
+  - `OPENAI_MODEL=gpt-5.4-mini`
+  - `OPENAI_REASONING_EFFORT=low`
 
 ## Regla operativa sobre Deployment Protection
 

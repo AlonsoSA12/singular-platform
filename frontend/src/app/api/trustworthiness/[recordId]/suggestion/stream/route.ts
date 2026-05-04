@@ -23,10 +23,12 @@ export async function POST(request: Request, context: RouteContext) {
     const { recordId } = await context.params;
     const body = (await request.json()) as {
       end?: string;
+      existingFeedback?: string | null;
       participantEmail?: string;
       start?: string;
     };
     const participantEmail = body.participantEmail?.trim().toLowerCase();
+    const existingFeedback = body.existingFeedback?.trim() ?? "";
     const start = body.start?.trim();
     const end = body.end?.trim();
 
@@ -52,6 +54,7 @@ export async function POST(request: Request, context: RouteContext) {
     const backendResponse = await fetchFromBackend(url, {
       body: JSON.stringify({
         end,
+        existingFeedback,
         participantEmail,
         start
       }),

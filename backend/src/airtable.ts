@@ -1,6 +1,8 @@
-import { getAirtableConfig, getOpenAIConfig } from "./config.js";
+import { randomUUID } from "node:crypto";
+import { getAgileAirtableConfig, getAirtableConfig, getOpenAIConfig } from "./config.js";
 
 type AirtableRecord = {
+  createdTime?: string;
   id: string;
   fields: Record<string, unknown>;
 };
@@ -8,6 +10,135 @@ type AirtableRecord = {
 type AirtableResponse = {
   offset?: string;
   records: AirtableRecord[];
+};
+
+type AirtableCollaborator = {
+  email?: string;
+  id?: string;
+  name?: string;
+};
+
+type AgileObjectiveStatus = "Achieved" | "In Progress" | "Pending Review" | "Underachieved";
+type AgileKeyResultStatus = "Done" | "In progress" | "Todo";
+type AgileKeyProjectStatus = "Active" | "Archived" | "Suggested by Resource";
+type AgileObjectiveHealthStatus = "At Risk" | "Critical" | "Healthy" | "Needs Attention";
+
+type CreateAgileObjectiveInput = {
+  aiSuggestedKeyResults?: string;
+  description?: string;
+  explanation?: string;
+  metric?: string;
+  objective: string;
+  priority?: string;
+  projectId: string;
+  quarter?: string;
+  status?: AgileObjectiveStatus;
+  targetDate?: string;
+  type?: string;
+};
+
+type CreateAgileKeyResultInput = {
+  currentValue?: number | null;
+  explanation?: string;
+  initialValue?: number | null;
+  keyResult: string;
+  metric?: string;
+  objectiveId: string;
+  projectId: string;
+  quarter?: string;
+  status?: AgileKeyResultStatus;
+  targetDate?: string;
+  targetValue?: number | null;
+};
+
+type CreateAgileKeyProjectInput = {
+  dontShowInSingularStories?: boolean;
+  epicStory?: string;
+  justification?: string;
+  name: string;
+  projectId: string;
+  status?: AgileKeyProjectStatus;
+  totalStories?: number | null;
+};
+
+type AgileKeyResultSentimentInput = {
+  code?: string;
+  currentValue?: number | null;
+  id: string;
+  initialValue?: number | null;
+  metric?: string;
+  progress?: number | null;
+  status?: string;
+  targetDate?: string;
+  targetValue?: number | null;
+  title: string;
+};
+
+type AgileObjectiveHealthKeyResultInput = AgileKeyResultSentimentInput & {
+  explanation?: string;
+};
+
+type AgileObjectiveHealthInput = {
+  description?: string;
+  id: string;
+  keyResultSentiments?: Array<{
+    keyResultId: string;
+    metricStatus: AgileKeyResultMetricStatus;
+  }>;
+  keyResults?: AgileObjectiveHealthKeyResultInput[];
+  quarter?: string;
+  score?: number | null;
+  status?: string | null;
+  targetDate?: string;
+  title: string;
+};
+
+type AgileObjectiveHealthAnalysisInput = {
+  keyProjects?: unknown[];
+  objectives: AgileObjectiveHealthInput[];
+  project?: {
+    id?: string;
+    name?: string;
+  };
+};
+
+type AgileKeyResultMetricStatus = "BLEEDING" | "COLD" | "HOT" | "NEW";
+type AgileKeyResultSentiment = "Bud" | "Rose" | "Thorn";
+
+type AgilePortfolioAnalysisProjectInput = {
+  keyResultCount?: number;
+  objectiveCount?: number;
+  projectId?: string;
+  projectName?: string;
+  score?: number | null;
+  signalCounts?: {
+    bleeding?: number;
+    cold?: number;
+    hot?: number;
+    new?: number;
+  };
+  status?: "empty" | "error" | "loading" | "ready";
+};
+
+type AgilePortfolioAnalysisInput = {
+  generatedFor?: string;
+  portfolioScore?: number | null;
+  projects: AgilePortfolioAnalysisProjectInput[];
+};
+
+type AgileObjectiveDraftInput = {
+  existingObjectives?: unknown[];
+  idea: string;
+  keyProjects?: unknown[];
+  projectId: string;
+  projectName: string;
+};
+
+type AgileKeyResultDraftInput = {
+  existingKeyResults?: unknown[];
+  objective: unknown;
+  projectId: string;
+  projectName: string;
 };
 
 type TrustworthinessRecordUpdateFields = {
@@ -119,6 +250,95 @@ type TrustworthinessAssistantConversationInput = {
   suggestion: Record<string, unknown>;
 };
 
+type TrustworthinessAssistantReply = {
+  changeSource: TrustworthinessAssistantChangeSource;
+  citations: TrustworthinessAssistantCitation[];
+  decisionTrace: string[];
+  evidenceQuestion: string | null;
+  focusArea: TrustworthinessAssistantFocusArea;
+  message: string;
+  needsOptionalEvidence: boolean;
+  nextIntent: TrustworthinessAssistantIntent;
+  proposal: TrustworthinessAssistantProposal;
+  proposalChanged: boolean;
+};
+
+type TrustworthinessAssistantSession = {
+  activeSessionEmail?: string;
+  context: {
+    end: string;
+    evaluatedName: string;
+    evaluatorEmail: string;
+    participantEmail: string;
+    projectContext?: string | null;
+    recordId: string;
+    roleLabel?: string | null;
+    start: string;
+  };
+  expiresAt: number;
+  history: Array<{
+    content: string;
+    role: "assistant" | "user";
+  }>;
+  meetings: TrustworthinessAssistantMeeting[];
+  proposal: TrustworthinessAssistantProposal;
+  suggestion: Record<string, unknown>;
+  updatedAt: number;
+};
+
+type TrustworthinessAssistantHistoryEntry = {
+  content: string;
+  role: "assistant" | "user";
+};
+
+type TrustworthinessAssistantSessionRehydrateInput = {
+  activeSessionEmail?: string;
+  end: string;
+  evaluatedName: string;
+  evaluatorEmail: string;
+  history?: TrustworthinessAssistantHistoryEntry[];
+  meetings?: TrustworthinessAssistantMeeting[];
+  participantEmail: string;
+  projectContext?: string | null;
+  proposal?: TrustworthinessAssistantProposal;
+  roleLabel?: string | null;
+  start: string;
+  suggestion?: Record<string, unknown>;
+};
+
+export type TrustworthinessAssistantStreamEvent =
+  | {
+      label: string;
+      type: "status";
+    }
+  | {
+      delta: string;
+      type: "assistant_text_delta";
+    }
+  | {
+      label: string;
+      tool: "searchMeetingEvidence" | "updateProposal" | "prepareSave";
+      type: "tool_start";
+    }
+  | {
+      result: Record<string, unknown>;
+      tool: "searchMeetingEvidence" | "updateProposal" | "prepareSave";
+      type: "tool_done";
+    }
+  | {
+      delta: string;
+      type: "decision_trace_delta";
+    }
+  | ({
+      sessionId: string;
+      type: "assistant_structured_final";
+    } & TrustworthinessAssistantReply)
+  | {
+      code?: string;
+      message: string;
+      type: "error";
+    };
+
 type TrustworthinessAssistantSaveInput = {
   agentId?: string;
   agentVersion?: string;
@@ -172,6 +392,10 @@ type TrustworthinessSuggestionStageEmitter = (
   stage: TrustworthinessSuggestionStage
 ) => void | Promise<void>;
 
+type TrustworthinessSuggestionTraceEmitter = (
+  trace: string
+) => void | Promise<void>;
+
 const TRUSTWORTHINESS_START_FIELD = "Start Date Range";
 const TRUSTWORTHINESS_END_FIELD = "End Date Range";
 const TRUSTWORTHINESS_EVALUATOR_EMAIL_FIELD = "Email address from Evaluator";
@@ -185,6 +409,17 @@ const SPRINT_NAME_FIELD = "Sprint Name";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const TRUSTWORTHINESS_ASSISTANT_AGENT_ID = "asistente-revision-tw";
 const TRUSTWORTHINESS_ASSISTANT_AGENT_VERSION = "0.1.0";
+const ASSISTANT_HISTORY_LIMIT = 6;
+const ASSISTANT_MEETING_LIMIT = 8;
+const ASSISTANT_TEXT_LIMIT = 900;
+const ASSISTANT_SHORT_TEXT_LIMIT = 260;
+const ASSISTANT_SESSION_TTL_MS = 45 * 60 * 1000;
+const assistantSessions = new Map<string, TrustworthinessAssistantSession>();
+
+type OpenAITextStreamHandlers = {
+  onCompleted?: (text: string) => void | Promise<void>;
+  onDelta?: (delta: string) => void | Promise<void>;
+};
 
 function escapeFormulaValue(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
@@ -228,6 +463,10 @@ function parseIsoDateLiteral(value: string) {
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function isAirtableCollaborator(value: unknown): value is AirtableCollaborator {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function toIsoDateLiteral(value: Date) {
@@ -506,6 +745,1546 @@ function getCoachingInputLogConnection() {
   };
 }
 
+function getAgileAirtableConnection() {
+  const agileConfig = getAgileAirtableConfig();
+  const resolveTableName = (tableName: string, tableId: string) =>
+    tableName === "Key Result" || tableName === "Key Project" || tableName === "Key Result History"
+      ? tableId
+      : tableName;
+
+  return {
+    apiToken: agileConfig.airtableAgileApiToken,
+    baseId: agileConfig.airtableAgileBaseId,
+    keyProjectTableName: resolveTableName(agileConfig.airtableAgileKeyProjectTableName, "tblu9Jj3IFaDzAu3T"),
+    keyResultHistoryTableName: resolveTableName(
+      agileConfig.airtableAgileKeyResultHistoryTableName,
+      "tbl6vfKhWFgBgUVVJ"
+    ),
+    keyResultTableName: resolveTableName(agileConfig.airtableAgileKeyResultTableName, "tblwSWyJl7p6NgYUA"),
+    objectiveTableName: agileConfig.airtableAgileObjectiveTableName,
+    projectsTableName: agileConfig.airtableAgileProjectsTableName
+  };
+}
+
+function getCollaboratorEmail(value: unknown) {
+  if (!isAirtableCollaborator(value)) {
+    return null;
+  }
+
+  const rawEmail = typeof value.email === "string" ? value.email : "";
+  return rawEmail.trim().length > 0 ? normalizeEmail(rawEmail) : null;
+}
+
+function getCollaboratorName(value: unknown) {
+  if (!isAirtableCollaborator(value)) {
+    return null;
+  }
+
+  const rawName = typeof value.name === "string" ? value.name.trim() : "";
+  return rawName.length > 0 ? rawName : null;
+}
+
+function mapAgileProject(record: AirtableRecord) {
+  const collaborator = record.fields["Collaborator"] ?? record.fields["collaborator"];
+  const rawName =
+    record.fields["Clientes"] ??
+    record.fields["clients"] ??
+    record.fields["Project"] ??
+    record.fields["Project Name"] ??
+    record.fields["client_name"] ??
+    record.fields["Name"];
+  const rawStatus = record.fields["Estatus"] ?? record.fields["status"];
+  const name = typeof rawName === "string" && rawName.trim().length > 0
+    ? rawName.trim()
+    : record.id;
+
+  return {
+    id: record.id,
+    sourceRecordId:
+      getFirstTextValue(getFieldValue(record.fields, "recordID")) ??
+      getFirstTextValue(getFieldValue(record.fields, "recordid")) ??
+      "",
+    name,
+    collaborator: {
+      email: getCollaboratorEmail(collaborator),
+      name: getCollaboratorName(collaborator)
+    },
+    status: typeof rawStatus === "string" ? rawStatus.trim() : null
+  };
+}
+
+export async function listAgileProjectsForCollaborator(collaboratorEmail: string) {
+  const normalizedCollaboratorEmail = normalizeEmail(collaboratorEmail);
+  const agileConnection = getAgileAirtableConnection();
+  const records = await fetchAirtableRecords(agileConnection.projectsTableName, {
+    apiToken: agileConnection.apiToken,
+    baseId: agileConnection.baseId
+  });
+  const projects = records
+    .map(mapAgileProject)
+    .filter((project) => project.collaborator.email === normalizedCollaboratorEmail)
+    .filter((project) => !project.status || project.status === "Active")
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+
+  return {
+    collaboratorEmail: normalizedCollaboratorEmail,
+    projects,
+    recordCount: projects.length,
+    tableName: agileConnection.projectsTableName
+  };
+}
+
+function normalizeAirtableFieldName(fieldName: string) {
+  return fieldName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function getFieldValue(fields: Record<string, unknown>, fieldName: string) {
+  if (fieldName in fields) {
+    return fields[fieldName];
+  }
+
+  const normalizedFieldName = normalizeAirtableFieldName(fieldName);
+  const compactFieldName = normalizedFieldName.replaceAll("_", "");
+  const entry = Object.entries(fields).find(([key]) => {
+    const normalizedKey = normalizeAirtableFieldName(key);
+
+    return normalizedKey === normalizedFieldName || normalizedKey.replaceAll("_", "") === compactFieldName;
+  });
+
+  return entry?.[1];
+}
+
+function getTextField(fields: Record<string, unknown>, fieldName: string) {
+  const value = getFieldValue(fields, fieldName);
+
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getNumberField(fields: Record<string, unknown>, fieldName: string) {
+  const value = getFieldValue(fields, fieldName);
+
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getBooleanField(fields: Record<string, unknown>, fieldName: string) {
+  return getFieldValue(fields, fieldName) === true;
+}
+
+function getOptionalObjectiveStatus(value: unknown) {
+  if (
+    value === "Achieved" ||
+    value === "In Progress" ||
+    value === "Pending Review" ||
+    value === "Underachieved"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function getOptionalKeyResultStatus(value: unknown) {
+  if (value === "Done" || value === "In progress" || value === "Todo") {
+    return value;
+  }
+
+  return null;
+}
+
+function getOptionalKeyProjectStatus(value: unknown) {
+  if (value === "Active" || value === "Archived" || value === "Suggested by Resource") {
+    return value;
+  }
+
+  return null;
+}
+
+function requireNonEmptyString(value: string | undefined, fieldName: string) {
+  const trimmedValue = value?.trim() ?? "";
+
+  if (!trimmedValue) {
+    throw new Error(`${fieldName} es obligatorio.`);
+  }
+
+  return trimmedValue;
+}
+
+function normalizeNullablePercentInput(value: number | null | undefined) {
+  if (value === undefined || value === null || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return value > 1 ? value / 100 : value;
+}
+
+function calculateAgileKeyResultProgress(input: {
+  currentValue?: number | null;
+  initialValue?: number | null;
+  targetValue?: number | null;
+}) {
+  const initialValue =
+    typeof input.initialValue === "number" && Number.isFinite(input.initialValue) ? input.initialValue : null;
+  const currentValue =
+    typeof input.currentValue === "number" && Number.isFinite(input.currentValue) ? input.currentValue : null;
+  const targetValue =
+    typeof input.targetValue === "number" && Number.isFinite(input.targetValue) ? input.targetValue : null;
+
+  if (initialValue === null || currentValue === null || targetValue === null || targetValue === initialValue) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(((currentValue - initialValue) / (targetValue - initialValue)) * 100)));
+}
+
+function normalizeScoreObjetives(value: number | null) {
+  if (value === null) {
+    return null;
+  }
+
+  if (value <= 1) {
+    return Math.round(value * 100);
+  }
+
+  if (value <= 10) {
+    return Math.round(value * 10);
+  }
+
+  return Math.round(value);
+}
+
+function getPercentField(fields: Record<string, unknown>, fieldName: string) {
+  const value = fields[fieldName];
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return normalizePercentLike(value);
+  }
+
+  if (typeof value !== "string") {
+    return 0;
+  }
+
+  const parsed = Number.parseFloat(value.replace("%", "").trim());
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
+function formatCollaboratorLookup(value: unknown) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  const labels = value
+    .map((item) => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+
+      if (isAirtableCollaborator(item)) {
+        return item.name?.trim() || item.email?.trim() || "";
+      }
+
+      return "";
+    })
+    .filter((item) => item.length > 0);
+
+  return [...new Set(labels)].join(", ");
+}
+
+function mapAgileKeyResult(record: AirtableRecord) {
+  const fields = record.fields;
+  const currentValue = getNumberField(fields, "Current Value");
+  const initialValue = getNumberField(fields, "Initial Value");
+  const targetValue = getNumberField(fields, "Target Value");
+  const storedProgress = getPercentField(fields, "Progress") || getPercentField(fields, "Progress Number");
+  const progress =
+    calculateAgileKeyResultProgress({
+      currentValue,
+      initialValue,
+      targetValue
+    }) ?? storedProgress;
+
+  return {
+    id: record.id,
+    code: getTextField(fields, "#"),
+    currentValue,
+    explanation: getTextField(fields, "Explanation"),
+    initialValue,
+    metric: getTextField(fields, "Metric"),
+    progress,
+    status: getTextField(fields, "Status"),
+    targetDate: getTextField(fields, "Target Date"),
+    targetValue,
+    title: getTextField(fields, "Key Result") || getTextField(fields, "Name") || record.id
+  };
+}
+
+function mapAgileKeyResultHistoryPoint(record: AirtableRecord) {
+  const fields = record.fields;
+  const currentValue = getNumberField(fields, "Current Value");
+  const initialValue = getNumberField(fields, "Initial Value");
+  const targetValue = getNumberField(fields, "Target Value");
+  const storedProgress = getPercentField(fields, "Progress") || getPercentField(fields, "Progress Number");
+  const progress =
+    calculateAgileKeyResultProgress({
+      currentValue,
+      initialValue,
+      targetValue
+    }) ?? storedProgress;
+
+  return {
+    id: record.id,
+    currentValue,
+    initialValue,
+    name: getTextField(fields, "Name"),
+    no: getNumberField(fields, "No."),
+    progress,
+    progressNumber: getNumberField(fields, "Progress Number"),
+    quarter: getTextField(fields, "Quarter"),
+    scoreKeyResult: getNumberField(fields, "Score Key Result"),
+    status: getTextField(fields, "Status"),
+    targetDate: getTextField(fields, "Target Date"),
+    targetValue,
+    writtenExplanationScore: getTextField(fields, "Written Explanation Score")
+  };
+}
+
+function compareAgileKeyResultHistoryPoints(
+  left: ReturnType<typeof mapAgileKeyResultHistoryPoint>,
+  right: ReturnType<typeof mapAgileKeyResultHistoryPoint>
+) {
+  if (left.no !== null && right.no !== null) {
+    return left.no - right.no;
+  }
+
+  if (left.no !== null) {
+    return -1;
+  }
+
+  if (right.no !== null) {
+    return 1;
+  }
+
+  const leftDate = Date.parse(left.targetDate);
+  const rightDate = Date.parse(right.targetDate);
+
+  if (Number.isFinite(leftDate) && Number.isFinite(rightDate)) {
+    return leftDate - rightDate;
+  }
+
+  if (Number.isFinite(leftDate)) {
+    return -1;
+  }
+
+  if (Number.isFinite(rightDate)) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function mapAgileObjective(record: AirtableRecord) {
+  const fields = record.fields;
+  const name = getTextField(fields, "Name");
+  const objective = getTextField(fields, "Objective");
+  const description = getTextField(fields, "Objetive Description");
+  const explanation = getTextField(fields, "Explanation");
+  const projectIds = getLinkedRecordIds(getFieldValue(fields, "Project"));
+  const keyResultIds = getLinkedRecordIds(getFieldValue(fields, "Key Results"));
+  const score = normalizeScoreObjetives(getNumberField(fields, "Score Objetives"));
+
+  return {
+    id: record.id,
+    aiSuggestedKeyResults: getTextField(fields, "AI suggested key results"),
+    createdAt: record.createdTime ?? getTextField(fields, "Created"),
+    description,
+    explanation,
+    keyResultIds,
+    keyResults: [],
+    metric: getTextField(fields, "Metric"),
+    name: name || objective || record.id,
+    no: getNumberField(fields, "No."),
+    objective,
+    poUser: getFieldValue(fields, "po_user") ?? null,
+    poUserLabel: formatCollaboratorLookup(getFieldValue(fields, "po_user")),
+    priority: getTextField(fields, "Priority"),
+    projectIds,
+    quarter: getTextField(fields, "Quarter"),
+    recordId: getTextField(fields, "Record Id"),
+    score,
+    status: getOptionalObjectiveStatus(getFieldValue(fields, "Status")),
+    targetDate: getTextField(fields, "Target Date"),
+    type: getTextField(fields, "Type")
+  };
+}
+
+function normalizePercentLike(value: number | null) {
+  if (value === null) {
+    return 0;
+  }
+
+  if (value <= 1) {
+    return Math.round(value * 100);
+  }
+
+  return Math.round(value);
+}
+
+function compactAirtableCreateFields(fields: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => {
+      if (value === null || value === undefined) {
+        return false;
+      }
+
+      if (typeof value === "string" && value.trim().length === 0) {
+        return false;
+      }
+
+      if (Array.isArray(value) && value.length === 0) {
+        return false;
+      }
+
+      return true;
+    })
+  );
+}
+
+function mapAgileKeyProject(record: AirtableRecord) {
+  const fields = record.fields;
+  const qualityScore = normalizePercentLike(getNumberField(fields, "Quality Score"));
+  const finalScore = normalizePercentLike(getNumberField(fields, "finalScore"));
+  const projectIds = getLinkedRecordIds(getFieldValue(fields, "Projects"));
+
+  return {
+    id: record.id,
+    aiStoriesAssist: getTextField(fields, "AI Stories Assist"),
+    clarity: getNumberField(fields, "Clarity"),
+    createdAt: getTextField(fields, "Create"),
+    dontShowInSingularStories: getBooleanField(fields, "Don't Show In Singular Stories"),
+    epicUpdatedAt: getTextField(fields, "Epic Updated"),
+    finalScore,
+    keyProjectId: getTextField(fields, "ID"),
+    justification: getTextField(fields, "Justification"),
+    name: getTextField(fields, "Epic Name"),
+    projectIds,
+    qualityScore,
+    strategicFocus: getNumberField(fields, "Strategic Focus"),
+    story: getTextField(fields, "Epic Story"),
+    status: getTextField(fields, "Status"),
+    totalStories: getNumberField(fields, "Total Stories"),
+    valueOrientation: getNumberField(fields, "Value Orientation")
+  };
+}
+
+export async function listAgileKeyProjectsForProject(projectId: string) {
+  const agileConnection = getAgileAirtableConnection();
+  const records = await fetchAirtableRecords(agileConnection.keyProjectTableName, {
+    apiToken: agileConnection.apiToken,
+    baseId: agileConnection.baseId
+  });
+  const keyProjects = records
+    .map(mapAgileKeyProject)
+    .filter((keyProject) => keyProject.projectIds.includes(projectId))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+
+  return {
+    keyProjects,
+    projectId,
+    recordCount: keyProjects.length,
+    tableName: agileConnection.keyProjectTableName
+  };
+}
+
+export async function listAgileKeyResultHistoryBulk(keyResultIds: string[]) {
+  const normalizedKeyResultIds = [...new Set(keyResultIds.map((keyResultId) => keyResultId.trim()).filter(Boolean))];
+
+  if (normalizedKeyResultIds.length === 0) {
+    throw new Error("La lista de Key Results es obligatoria.");
+  }
+
+  const agileConnection = getAgileAirtableConnection();
+  const historyByKeyResultId = Object.fromEntries(
+    normalizedKeyResultIds.map((keyResultId) => [keyResultId, [] as ReturnType<typeof mapAgileKeyResultHistoryPoint>[]])
+  );
+  const records = await fetchAirtableRecords(agileConnection.keyResultHistoryTableName, {
+    apiToken: agileConnection.apiToken,
+    baseId: agileConnection.baseId
+  });
+
+  const requestedKeyResultIds = new Set(normalizedKeyResultIds);
+
+  for (const record of records) {
+    const linkedKeyResultIds = getAgileKeyResultHistoryRecordIds(record).filter((keyResultId) =>
+      requestedKeyResultIds.has(keyResultId)
+    );
+
+    for (const keyResultId of linkedKeyResultIds) {
+      historyByKeyResultId[keyResultId]?.push(mapAgileKeyResultHistoryPoint(record));
+    }
+  }
+
+  for (const keyResultId of normalizedKeyResultIds) {
+    historyByKeyResultId[keyResultId].sort(compareAgileKeyResultHistoryPoints);
+  }
+
+  return {
+    historyByKeyResultId,
+    keyResultIds: normalizedKeyResultIds,
+    recordCount: Object.values(historyByKeyResultId).reduce((total, history) => total + history.length, 0),
+    tableName: agileConnection.keyResultHistoryTableName
+  };
+}
+
+function getAgileKeyResultHistoryRecordIds(record: AirtableRecord) {
+  return getLinkedRecordIds(getFieldValue(record.fields, "Key Result"));
+}
+
+function getAgileKeyResultSentimentFromMetricStatus(
+  metricStatus: AgileKeyResultMetricStatus
+): AgileKeyResultSentiment {
+  if (metricStatus === "HOT") return "Rose";
+  if (metricStatus === "BLEEDING") return "Thorn";
+  return "Bud";
+}
+
+function calculateAgileKeyResultMetricStatus(
+  keyResult: AgileKeyResultSentimentInput,
+  history: ReturnType<typeof mapAgileKeyResultHistoryPoint>[]
+): AgileKeyResultMetricStatus {
+  const points =
+    history.length > 0
+      ? history.map((point) => ({
+          currentValue: point.currentValue,
+          initialValue: point.initialValue,
+          targetValue: point.targetValue
+        }))
+      : [
+          {
+            currentValue: keyResult.currentValue ?? null,
+            initialValue: keyResult.initialValue ?? null,
+            targetValue: keyResult.targetValue ?? null
+          }
+        ];
+
+  if (points.length < 2) {
+    const progress = typeof keyResult.progress === "number" ? keyResult.progress : null;
+
+    if (progress === null) return "NEW";
+    if (progress >= 80) return "HOT";
+    if (progress > 0) return "COLD";
+    return "NEW";
+  }
+
+  const changedPoints: typeof points = [];
+  let previousCurrent: number | null = null;
+  let previousInitial: number | null = null;
+  let previousTarget: number | null = null;
+
+  for (const point of points) {
+    const currentChanged = previousCurrent !== null && point.currentValue !== previousCurrent;
+    const initialChanged = previousInitial !== null && point.initialValue !== previousInitial;
+    const targetChanged = previousTarget !== null && point.targetValue !== previousTarget;
+
+    if (previousCurrent === null || currentChanged || initialChanged || targetChanged) {
+      changedPoints.push(point);
+    }
+
+    previousCurrent = point.currentValue;
+    previousInitial = point.initialValue;
+    previousTarget = point.targetValue;
+  }
+
+  if (changedPoints.length < 2) return "NEW";
+
+  const recentPoints = changedPoints.slice(-5);
+  const first = recentPoints[0];
+  const last = recentPoints[recentPoints.length - 1];
+
+  if (
+    typeof first.currentValue !== "number" ||
+    typeof first.initialValue !== "number" ||
+    typeof last.currentValue !== "number" ||
+    typeof last.targetValue !== "number"
+  ) {
+    return "NEW";
+  }
+
+  const isGrowthGoal = last.targetValue >= first.initialValue;
+  const valueChange = last.currentValue - first.currentValue;
+  const range = Math.abs(last.targetValue - first.initialValue) || 1;
+  const changePercent = valueChange / range;
+  const threshold = 0.05;
+
+  if (isGrowthGoal) {
+    if (changePercent > threshold) return "HOT";
+    if (changePercent < -threshold) return "BLEEDING";
+  } else {
+    if (changePercent < -threshold) return "HOT";
+    if (changePercent > threshold) return "BLEEDING";
+  }
+
+  return "COLD";
+}
+
+function getAgileKeyResultSentimentReason(
+  metricStatus: AgileKeyResultMetricStatus,
+  historyCount: number
+) {
+  if (metricStatus === "HOT") {
+    return "The Key Result is moving toward its target with positive momentum.";
+  }
+
+  if (metricStatus === "BLEEDING") {
+    return "The Key Result is moving away from its target and needs intervention.";
+  }
+
+  if (metricStatus === "COLD") {
+    return "The Key Result is within the movement threshold and needs focus to accelerate.";
+  }
+
+  return historyCount > 0
+    ? "History exists, but there are not enough value changes to determine a trend."
+    : "There is not enough history yet to determine a trend.";
+}
+
+export async function analyzeAgileKeyResultSentiments(
+  keyResults: AgileKeyResultSentimentInput[]
+) {
+  const normalizedKeyResults = keyResults
+    .map((keyResult) => ({
+      ...keyResult,
+      id: requireNonEmptyString(keyResult.id, "Key Result"),
+      title: keyResult.title?.trim() || keyResult.id
+    }))
+    .slice(0, 20);
+
+  const historyByKeyResultId = (await listAgileKeyResultHistoryBulk(
+    normalizedKeyResults.map((keyResult) => keyResult.id)
+  )).historyByKeyResultId;
+  const historyByKeyResult = normalizedKeyResults.map((keyResult) => ({
+    history: historyByKeyResultId[keyResult.id] ?? [],
+    keyResult
+  }));
+
+  const deterministicAnalyses = historyByKeyResult.map(({ history, keyResult }) => {
+    const metricStatus = calculateAgileKeyResultMetricStatus(keyResult, history);
+    const sentiment = getAgileKeyResultSentimentFromMetricStatus(metricStatus);
+
+    return {
+      confidence: history.length >= 2 ? "high" : history.length === 1 ? "medium" : "low",
+      keyResultId: keyResult.id,
+      metricStatus,
+      model: "deterministic",
+      reason: getAgileKeyResultSentimentReason(metricStatus, history.length),
+      recommendedAction:
+        sentiment === "Rose"
+          ? "Protect the current execution pattern and watch for regression."
+          : sentiment === "Thorn"
+            ? "Review blockers, ownership, and target plan in the next OKR check-in."
+            : "Define the next concrete action to move the Key Result toward target.",
+      sentiment,
+      usedHistoryPoints: history.length
+    };
+  });
+
+  const openAIConfig = getOpenAIConfig();
+  const model = openAIConfig.model || "gpt-5.4-mini";
+
+  if (!openAIConfig.apiKey) {
+    return {
+      analyses: deterministicAnalyses,
+      model,
+      ok: true
+    };
+  }
+
+  const input = [
+    "You classify OKR Key Results using Rose, Bud, Thorn and HOT/COLD/BLEEDING/NEW criteria.",
+    "Use the deterministic trend as the primary calculation. Do not contradict it unless the provided data clearly shows a calculation error.",
+    "Mapping: HOT=Rose, BLEEDING=Thorn, COLD or NEW=Bud.",
+    "Trend criteria: compare recent history movement toward target. More than 5% of range toward target is HOT. More than 5% away is BLEEDING. Within threshold is COLD. Insufficient changed history is NEW.",
+    "Return concise business-facing explanations.",
+    JSON.stringify(
+      {
+        keyResults: historyByKeyResult.map(({ history, keyResult }, index) => ({
+          deterministic: deterministicAnalyses[index],
+          history,
+          keyResult
+        }))
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+
+  try {
+    const responseText = await callConfiguredModelForJson({
+      input,
+      model,
+      schemaName: "agile_key_result_sentiment_analysis",
+      schema: {
+        additionalProperties: false,
+        properties: {
+          analyses: {
+            items: {
+              additionalProperties: false,
+              properties: {
+                confidence: {
+                  enum: ["low", "medium", "high"],
+                  type: "string"
+                },
+                keyResultId: {
+                  type: "string"
+                },
+                metricStatus: {
+                  enum: ["HOT", "COLD", "BLEEDING", "NEW"],
+                  type: "string"
+                },
+                reason: {
+                  type: "string"
+                },
+                recommendedAction: {
+                  type: "string"
+                },
+                sentiment: {
+                  enum: ["Rose", "Bud", "Thorn"],
+                  type: "string"
+                }
+              },
+              required: [
+                "confidence",
+                "keyResultId",
+                "metricStatus",
+                "reason",
+                "recommendedAction",
+                "sentiment"
+              ],
+              type: "object"
+            },
+            type: "array"
+          }
+        },
+        required: ["analyses"],
+        type: "object"
+      }
+    });
+    const parsed = JSON.parse(responseText ?? "{}") as {
+      analyses?: Array<{
+        confidence: Confidence;
+        keyResultId: string;
+        metricStatus: AgileKeyResultMetricStatus;
+        reason: string;
+        recommendedAction: string;
+        sentiment: AgileKeyResultSentiment;
+      }>;
+    };
+    const byId = new Map(parsed.analyses?.map((analysis) => [analysis.keyResultId, analysis]) ?? []);
+
+    return {
+      analyses: deterministicAnalyses.map((analysis) => ({
+        ...analysis,
+        ...(byId.get(analysis.keyResultId) ?? {}),
+        model
+      })),
+      model,
+      ok: true
+    };
+  } catch (error) {
+    return {
+      analyses: deterministicAnalyses,
+      message:
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar el análisis de Rose/Bud/Thorn con IA.",
+      model,
+      ok: true
+    };
+  }
+}
+
+function getObjectiveHealthFallbackStatus(score: number, keyResultCount: number): AgileObjectiveHealthStatus {
+  if (keyResultCount === 0 || score <= 0) return "Critical";
+  if (score >= 80) return "Healthy";
+  if (score >= 40) return "Needs Attention";
+  return "At Risk";
+}
+
+function getObjectiveHealthFallbackSummary(
+  status: AgileObjectiveHealthStatus,
+  hotCount: number,
+  bleedingCount: number,
+  coldCount: number,
+  newCount: number
+) {
+  if (status === "Healthy") {
+    return "The Objective is progressing strongly, with enough KR momentum to keep execution on track.";
+  }
+
+  if (status === "Critical") {
+    return "The Objective has limited measurable traction or no active KR coverage, so it needs immediate ownership review.";
+  }
+
+  if (status === "At Risk") {
+    return bleedingCount > 0
+      ? "Some Key Results are moving away from target, creating execution risk for this Objective."
+      : "Progress is below the expected range and needs focused intervention to recover.";
+  }
+
+  if (coldCount + newCount > hotCount) {
+    return "The Objective has signals, but most KRs are either stable or too new to prove momentum yet.";
+  }
+
+  return "The Objective has partial momentum and needs a clearer next action to convert progress into outcome.";
+}
+
+function buildObjectiveHealthFallbackAnalysis(
+  objective: AgileObjectiveHealthInput,
+  index: number
+) {
+  const score = typeof objective.score === "number" && Number.isFinite(objective.score)
+    ? Math.max(0, Math.min(100, Math.round(objective.score)))
+    : Math.round(
+        ((objective.keyResults ?? []).reduce((sum, keyResult) => {
+          const progress = typeof keyResult.progress === "number" && Number.isFinite(keyResult.progress)
+            ? keyResult.progress
+            : 0;
+
+          return sum + Math.max(0, Math.min(100, progress));
+        }, 0) / Math.max((objective.keyResults ?? []).length, 1))
+      );
+  const sentiments = objective.keyResultSentiments ?? [];
+  const hotCount = sentiments.filter((sentiment) => sentiment.metricStatus === "HOT").length;
+  const bleedingCount = sentiments.filter((sentiment) => sentiment.metricStatus === "BLEEDING").length;
+  const coldCount = sentiments.filter((sentiment) => sentiment.metricStatus === "COLD").length;
+  const newCount = sentiments.filter((sentiment) => sentiment.metricStatus === "NEW").length;
+  const status = getObjectiveHealthFallbackStatus(score, (objective.keyResults ?? []).length);
+
+  return {
+    confidence: sentiments.length > 0 ? "medium" : "low",
+    headline:
+      status === "Healthy"
+        ? "Objective has measurable momentum"
+        : status === "Critical"
+          ? "Objective needs immediate alignment"
+          : status === "At Risk"
+            ? "Objective is trending below plan"
+            : "Objective needs focused acceleration",
+    objectiveId: objective.id || `objective-${index + 1}`,
+    primaryRisk:
+      bleedingCount > 0
+        ? "One or more Key Results are moving away from target."
+        : newCount > 0
+          ? "Some Key Results do not have enough historical signal yet."
+          : "KR progress is not strong enough to confirm outcome delivery.",
+    recommendedAction:
+      status === "Healthy"
+        ? "Protect the current operating rhythm and watch for regression."
+        : "Clarify ownership, next milestone, and the Key Result that should move first.",
+    score,
+    status,
+    summary: getObjectiveHealthFallbackSummary(status, hotCount, bleedingCount, coldCount, newCount)
+  } as const;
+}
+
+export async function analyzeAgileObjectiveHealth(input: AgileObjectiveHealthAnalysisInput) {
+  const normalizedObjectives = input.objectives
+    .map((objective, index) => ({
+      ...objective,
+      id: objective.id?.trim() || `objective-${index + 1}`,
+      title: objective.title?.trim() || objective.id || `Objective ${index + 1}`,
+      keyResults: Array.isArray(objective.keyResults) ? objective.keyResults : [],
+      keyResultSentiments: Array.isArray(objective.keyResultSentiments) ? objective.keyResultSentiments : []
+    }))
+    .slice(0, 12);
+  const fallbackAnalyses = normalizedObjectives.map(buildObjectiveHealthFallbackAnalysis);
+  const openAIConfig = getOpenAIConfig();
+  const model = openAIConfig.model || "gpt-5.4-mini";
+
+  if (!openAIConfig.apiKey || normalizedObjectives.length === 0) {
+    return {
+      analyses: fallbackAnalyses,
+      model,
+      ok: true
+    };
+  }
+
+  try {
+    const responseText = await callConfiguredModelForJson({
+      input: [
+        "You are helping PO/PM users understand Objective health in an OKR platform.",
+        "Use the provided deterministic fallback as the guardrail. You may improve headline, summary, primaryRisk, recommendedAction, confidence, and status only if the data supports it.",
+        "Classify each Objective using: Healthy, Needs Attention, At Risk, Critical.",
+        "Anchor your reasoning to Objective score, KR progress, KR metric statuses, target dates, and available Key Project context. Do not invent data.",
+        "Return concise, business-facing explanations. Headline must be 7 words or fewer. Summary must be one sentence.",
+        JSON.stringify(
+          {
+            fallbackAnalyses,
+            keyProjects: input.keyProjects ?? [],
+            objectives: normalizedObjectives,
+            project: input.project ?? null
+          },
+          null,
+          2
+        )
+      ].join("\n\n"),
+      model,
+      schemaName: "agile_objective_health_analysis",
+      schema: {
+        additionalProperties: false,
+        properties: {
+          analyses: {
+            items: {
+              additionalProperties: false,
+              properties: {
+                confidence: {
+                  enum: ["low", "medium", "high"],
+                  type: "string"
+                },
+                headline: {
+                  type: "string"
+                },
+                objectiveId: {
+                  type: "string"
+                },
+                primaryRisk: {
+                  type: "string"
+                },
+                recommendedAction: {
+                  type: "string"
+                },
+                score: {
+                  type: "number"
+                },
+                status: {
+                  enum: ["Healthy", "Needs Attention", "At Risk", "Critical"],
+                  type: "string"
+                },
+                summary: {
+                  type: "string"
+                }
+              },
+              required: [
+                "confidence",
+                "headline",
+                "objectiveId",
+                "primaryRisk",
+                "recommendedAction",
+                "score",
+                "status",
+                "summary"
+              ],
+              type: "object"
+            },
+            type: "array"
+          }
+        },
+        required: ["analyses"],
+        type: "object"
+      }
+    });
+    const parsed = JSON.parse(responseText ?? "{}") as {
+      analyses?: Array<{
+        confidence: "low" | "medium" | "high";
+        headline: string;
+        objectiveId: string;
+        primaryRisk: string;
+        recommendedAction: string;
+        score: number;
+        status: AgileObjectiveHealthStatus;
+        summary: string;
+      }>;
+    };
+    const byId = new Map(parsed.analyses?.map((analysis) => [analysis.objectiveId, analysis]) ?? []);
+
+    return {
+      analyses: fallbackAnalyses.map((analysis) => ({
+        ...analysis,
+        ...(byId.get(analysis.objectiveId) ?? {})
+      })),
+      model,
+      ok: true
+    };
+  } catch (error) {
+    return {
+      analyses: fallbackAnalyses,
+      message:
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar el análisis de salud del Objective con IA.",
+      model,
+      ok: true
+    };
+  }
+}
+
+function normalizePortfolioProject(project: AgilePortfolioAnalysisProjectInput, index: number) {
+  const signalCounts = project.signalCounts ?? {};
+
+  return {
+    keyResultCount: Math.max(0, Math.round(Number(project.keyResultCount ?? 0))),
+    objectiveCount: Math.max(0, Math.round(Number(project.objectiveCount ?? 0))),
+    projectId: project.projectId?.trim() || `project-${index + 1}`,
+    projectName: project.projectName?.trim() || `Project ${index + 1}`,
+    score: typeof project.score === "number" && Number.isFinite(project.score) ? Math.round(project.score) : null,
+    signalCounts: {
+      bleeding: Math.max(0, Math.round(Number(signalCounts.bleeding ?? 0))),
+      cold: Math.max(0, Math.round(Number(signalCounts.cold ?? 0))),
+      hot: Math.max(0, Math.round(Number(signalCounts.hot ?? 0))),
+      new: Math.max(0, Math.round(Number(signalCounts.new ?? 0)))
+    },
+    status:
+      project.status === "empty" || project.status === "error" || project.status === "loading" || project.status === "ready"
+        ? project.status
+        : "empty"
+  };
+}
+
+function buildPortfolioAnalysisFallback(input: AgilePortfolioAnalysisInput) {
+  const projects = input.projects.map(normalizePortfolioProject).filter((project) => project.status !== "loading");
+  const readyProjects = projects.filter((project) => project.status === "ready");
+  const score =
+    typeof input.portfolioScore === "number" && Number.isFinite(input.portfolioScore)
+      ? Math.round(input.portfolioScore)
+      : readyProjects.length > 0
+        ? Math.round(
+            readyProjects.reduce((total, project) => total + (project.score ?? 0), 0) / readyProjects.length
+          )
+        : null;
+  const winners = readyProjects
+    .filter((project) => (project.score ?? 0) >= 80 || project.signalCounts.hot >= 2)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .slice(0, 3);
+  const needsAttention = readyProjects
+    .filter(
+      (project) =>
+        project.signalCounts.bleeding > 0 ||
+        project.signalCounts.cold >= 2 ||
+        (project.score ?? 100) < 50 ||
+        project.signalCounts.new >= Math.max(2, project.keyResultCount)
+    )
+    .sort((a, b) => (a.score ?? 100) - (b.score ?? 100))
+    .slice(0, 3);
+  const noOkrCount = projects.filter((project) => project.status === "empty").length;
+
+  return {
+    executiveSummary:
+      score === null
+        ? "Portfolio analysis is waiting for loaded OKR data before a score can be calculated."
+        : `Portfolio score is ${score}%, based on ${readyProjects.length} project${readyProjects.length === 1 ? "" : "s"} with loaded OKR data.`,
+    needsAttention:
+      needsAttention.length > 0
+        ? needsAttention.map((project) => {
+            if (project.signalCounts.bleeding > 0) {
+              return `${project.projectName} needs attention because it has ${project.signalCounts.bleeding} BLEEDING Key Result signal${project.signalCounts.bleeding === 1 ? "" : "s"}.`;
+            }
+
+            if ((project.score ?? 100) < 50) {
+              return `${project.projectName} needs attention because its score is ${project.score ?? 0}%.`;
+            }
+
+            if (project.signalCounts.cold >= 2) {
+              return `${project.projectName} needs attention because ${project.signalCounts.cold} Key Results are COLD.`;
+            }
+
+            return `${project.projectName} needs more history because ${project.signalCounts.new} Key Results are NEW.`;
+          })
+        : noOkrCount > 0
+          ? [`${noOkrCount} project${noOkrCount === 1 ? "" : "s"} do not have loaded OKRs yet.`]
+          : ["No immediate portfolio risk is visible in the loaded OKR data."],
+    winners:
+      winners.length > 0
+        ? winners.map(
+            (project) =>
+              `${project.projectName} is a winner with ${project.score ?? 0}% score and ${project.signalCounts.hot} HOT Key Result signal${project.signalCounts.hot === 1 ? "" : "s"}.`
+          )
+        : ["No winner can be identified yet from the loaded OKR data."]
+  };
+}
+
+export async function analyzeAgilePortfolio(input: AgilePortfolioAnalysisInput) {
+  const normalizedInput = {
+    generatedFor: input.generatedFor?.trim() || "current portfolio",
+    portfolioScore: typeof input.portfolioScore === "number" && Number.isFinite(input.portfolioScore) ? Math.round(input.portfolioScore) : null,
+    projects: input.projects.map(normalizePortfolioProject).slice(0, 40)
+  };
+  const fallback = buildPortfolioAnalysisFallback(normalizedInput);
+  const openAIConfig = getOpenAIConfig();
+  const model = openAIConfig.model || "gpt-5.4-mini";
+
+  if (!openAIConfig.apiKey || normalizedInput.projects.length === 0) {
+    return {
+      analysis: fallback,
+      generatedAt: new Date().toISOString(),
+      model,
+      ok: true
+    };
+  }
+
+  try {
+    const responseText = await callConfiguredModelForJson({
+      input: [
+        "You write portfolio analysis for PO/PM users in an OKR platform.",
+        "Use only the JSON data provided. Do not invent project names, scores, metrics, percentages, dates, counts, or statuses.",
+        "If a fact is not present in the JSON, omit it or say there is not enough loaded OKR data.",
+        "Reference exact project names and exact numbers from the JSON only.",
+        "Tone: concise, executive, clear. Do not overhype. Do not use metaphors like cash cows or problem child.",
+        "Return one executive summary paragraph, 2-4 Winners bullets, and 2-4 Needs Attention bullets.",
+        "Winners should favor high score, HOT signals, and no BLEEDING signals.",
+        "Needs Attention should favor BLEEDING, multiple COLD, low score, no OKRs, or too many NEW signals.",
+        JSON.stringify(
+          {
+            fallback,
+            portfolio: normalizedInput
+          },
+          null,
+          2
+        )
+      ].join("\n\n"),
+      model,
+      schemaName: "agile_portfolio_analysis",
+      schema: {
+        additionalProperties: false,
+        properties: {
+          executiveSummary: {
+            type: "string"
+          },
+          needsAttention: {
+            items: {
+              type: "string"
+            },
+            type: "array"
+          },
+          winners: {
+            items: {
+              type: "string"
+            },
+            type: "array"
+          }
+        },
+        required: ["executiveSummary", "needsAttention", "winners"],
+        type: "object"
+      }
+    });
+    const parsed = JSON.parse(responseText ?? "{}") as {
+      executiveSummary?: string;
+      needsAttention?: string[];
+      winners?: string[];
+    };
+
+    return {
+      analysis: {
+        executiveSummary: parsed.executiveSummary || fallback.executiveSummary,
+        needsAttention: Array.isArray(parsed.needsAttention) && parsed.needsAttention.length > 0
+          ? parsed.needsAttention.slice(0, 4)
+          : fallback.needsAttention,
+        winners: Array.isArray(parsed.winners) && parsed.winners.length > 0
+          ? parsed.winners.slice(0, 4)
+          : fallback.winners
+      },
+      generatedAt: new Date().toISOString(),
+      model,
+      ok: true
+    };
+  } catch (error) {
+    return {
+      analysis: fallback,
+      generatedAt: new Date().toISOString(),
+      message:
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar el Portfolio Analysis con IA.",
+      model,
+      ok: true
+    };
+  }
+}
+
+const agileKeyResultDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    currentValue: {
+      type: ["number", "null"]
+    },
+    explanation: {
+      type: "string"
+    },
+    initialValue: {
+      type: ["number", "null"]
+    },
+    keyResult: {
+      type: "string"
+    },
+    metric: {
+      type: "string"
+    },
+    status: {
+      enum: ["Done", "In progress", "Todo"],
+      type: "string"
+    },
+    targetDate: {
+      type: "string"
+    },
+    targetValue: {
+      type: ["number", "null"]
+    }
+  },
+  required: [
+    "currentValue",
+    "explanation",
+    "initialValue",
+    "keyResult",
+    "metric",
+    "status",
+    "targetDate",
+    "targetValue"
+  ],
+  type: "object"
+} satisfies Record<string, unknown>;
+
+const agileObjectiveDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    draft: {
+      additionalProperties: false,
+      properties: {
+        description: {
+          type: "string"
+        },
+        explanation: {
+          type: "string"
+        },
+        keyResults: {
+          items: agileKeyResultDraftSchema,
+          maxItems: 3,
+          minItems: 3,
+          type: "array"
+        },
+        metric: {
+          type: "string"
+        },
+        objective: {
+          type: "string"
+        },
+        priority: {
+          type: "string"
+        },
+        targetDate: {
+          type: "string"
+        },
+        type: {
+          type: "string"
+        }
+      },
+      required: [
+        "description",
+        "explanation",
+        "keyResults",
+        "metric",
+        "objective",
+        "priority",
+        "targetDate",
+        "type"
+      ],
+      type: "object"
+    }
+  },
+  required: ["draft"],
+  type: "object"
+} satisfies Record<string, unknown>;
+
+const agileSingleKeyResultDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    draft: agileKeyResultDraftSchema
+  },
+  required: ["draft"],
+  type: "object"
+} satisfies Record<string, unknown>;
+
+function getAgileDraftModel() {
+  const openAIConfig = getOpenAIConfig();
+
+  return openAIConfig.model || "gpt-5.4-mini";
+}
+
+export async function generateAgileObjectiveDraft(input: AgileObjectiveDraftInput) {
+  const idea = requireNonEmptyString(input.idea, "Objective idea");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const projectName = requireNonEmptyString(input.projectName, "Project name");
+  const model = getAgileDraftModel();
+  const prompt = [
+    "Generate a coherent OKR Objective draft for a PO/PM OKR platform.",
+    "Use the user's objective idea as the primary intent. Use project context, existing objectives, and key projects to refine it, avoid duplication, and create measurable work.",
+    "The Objective must be outcome-focused, specific, and suitable for a product/project team.",
+    "Generate exactly 3 Key Results. Each KR must be measurable and include metric, initialValue, currentValue, targetValue, targetDate, status, and explanation.",
+    "Use decimal percentages for percentage values: 0.35 means 35%. If a metric is a count or time value, use the natural numeric value.",
+    "Prefer target dates in YYYY-MM-DD format. Use Todo for new KRs unless the context clearly says otherwise.",
+    JSON.stringify(
+      {
+        existingObjectives: input.existingObjectives ?? [],
+        keyProjects: input.keyProjects ?? [],
+        objectiveIdea: idea,
+        project: {
+          id: projectId,
+          name: projectName
+        }
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+  const responseText = await callConfiguredModelForJson({
+    input: prompt,
+    model,
+    schema: agileObjectiveDraftSchema,
+    schemaName: "agile_objective_draft"
+  });
+  const parsed = JSON.parse(responseText ?? "{}") as {
+    draft?: unknown;
+  };
+
+  if (!parsed.draft) {
+    throw new Error("La IA no devolvió un borrador de Objective válido.");
+  }
+
+  return {
+    draft: parsed.draft,
+    model,
+    ok: true
+  };
+}
+
+export async function generateAgileKeyResultDraft(input: AgileKeyResultDraftInput) {
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const projectName = requireNonEmptyString(input.projectName, "Project name");
+  const model = getAgileDraftModel();
+  const prompt = [
+    "Generate one measurable Key Result draft for an OKR platform.",
+    "Use the project and Objective context. Avoid duplicating existing Key Results.",
+    "The Key Result must be measurable, time-bound, and coherent with the Objective.",
+    "Return metric, initialValue, currentValue, targetValue, targetDate, status, and explanation.",
+    "Use decimal percentages for percentage values: 0.35 means 35%. If a metric is a count or time value, use the natural numeric value.",
+    JSON.stringify(
+      {
+        existingKeyResults: input.existingKeyResults ?? [],
+        objective: input.objective,
+        project: {
+          id: projectId,
+          name: projectName
+        }
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+  const responseText = await callConfiguredModelForJson({
+    input: prompt,
+    model,
+    schema: agileSingleKeyResultDraftSchema,
+    schemaName: "agile_key_result_draft"
+  });
+  const parsed = JSON.parse(responseText ?? "{}") as {
+    draft?: unknown;
+  };
+
+  if (!parsed.draft) {
+    throw new Error("La IA no devolvió un borrador de Key Result válido.");
+  }
+
+  return {
+    draft: parsed.draft,
+    model,
+    ok: true
+  };
+}
+
+export async function listAgileObjectivesForProject(projectId: string) {
+  const agileConnection = getAgileAirtableConnection();
+  const records = await fetchAirtableRecords(agileConnection.objectiveTableName, {
+    apiToken: agileConnection.apiToken,
+    baseId: agileConnection.baseId
+  });
+  const objectives = records
+    .map(mapAgileObjective)
+    .filter((objective) => objective.projectIds.includes(projectId))
+    .sort((left, right) => {
+      const leftCreatedAt = Date.parse(left.createdAt);
+      const rightCreatedAt = Date.parse(right.createdAt);
+
+      if (Number.isFinite(leftCreatedAt) && Number.isFinite(rightCreatedAt)) {
+        return rightCreatedAt - leftCreatedAt;
+      }
+
+      if (Number.isFinite(leftCreatedAt)) {
+        return -1;
+      }
+
+      if (Number.isFinite(rightCreatedAt)) {
+        return 1;
+      }
+
+      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+
+  const keyResultRecords = await fetchRecordsByIds(
+    agileConnection.keyResultTableName,
+    objectives.flatMap((objective) => objective.keyResultIds),
+    [],
+    {
+      apiToken: agileConnection.apiToken,
+      baseId: agileConnection.baseId
+    }
+  );
+  const keyResultsById = new Map(
+    keyResultRecords.map((record) => [record.id, mapAgileKeyResult(record)])
+  );
+  const hydratedObjectives = objectives.map((objective) => ({
+    ...objective,
+    keyResults: objective.keyResultIds
+      .map((keyResultId) => keyResultsById.get(keyResultId))
+      .filter((keyResult): keyResult is ReturnType<typeof mapAgileKeyResult> => Boolean(keyResult))
+  }));
+
+  return {
+    objectives: hydratedObjectives,
+    projectId,
+    recordCount: hydratedObjectives.length,
+    tableName: agileConnection.objectiveTableName
+  };
+}
+
+export async function createAgileObjective(input: CreateAgileObjectiveInput) {
+  const agileConnection = getAgileAirtableConnection();
+  const objective = requireNonEmptyString(input.objective, "Objective");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const status = getOptionalObjectiveStatus(input.status) ?? "Pending Review";
+
+  const record = await createAirtableRecord(
+    agileConnection.objectiveTableName,
+    compactAirtableCreateFields({
+      "AI suggested key results": input.aiSuggestedKeyResults?.trim() ?? "",
+      "Explanation": input.explanation?.trim() ?? "",
+      "Metric": input.metric?.trim() ?? "",
+      "Name": objective,
+      "Objective": objective,
+      "Objetive Description": input.description?.trim() ?? "",
+      "Priority": input.priority?.trim() ?? "",
+      "Project": [projectId],
+      "Quarter": input.quarter?.trim() ?? "",
+      "Status": status,
+      "Target Date": input.targetDate?.trim() || null,
+      "Type": input.type?.trim() ?? ""
+    }),
+    {
+      apiToken: agileConnection.apiToken,
+      baseId: agileConnection.baseId
+    }
+  );
+
+  return {
+    objective: mapAgileObjective(record),
+    tableName: agileConnection.objectiveTableName
+  };
+}
+
+export async function createAgileKeyResult(input: CreateAgileKeyResultInput) {
+  const agileConnection = getAgileAirtableConnection();
+  const keyResult = requireNonEmptyString(input.keyResult, "Key Result");
+  const objectiveId = requireNonEmptyString(input.objectiveId, "Objective");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const status = getOptionalKeyResultStatus(input.status) ?? "Todo";
+  const initialValue = normalizeNullablePercentInput(input.initialValue);
+  const currentValue = normalizeNullablePercentInput(input.currentValue);
+  const targetValue = normalizeNullablePercentInput(input.targetValue);
+  const progress = calculateAgileKeyResultProgress(input);
+  const connection = {
+    apiToken: agileConnection.apiToken,
+    baseId: agileConnection.baseId
+  };
+  const [objectiveRecord] = await fetchRecordsByIds(
+    agileConnection.objectiveTableName,
+    [objectiveId],
+    ["Project", "Key Results"],
+    connection
+  );
+
+  if (!objectiveRecord) {
+    throw new Error("No se encontró el Objective seleccionado.");
+  }
+
+  const objectiveProjectIds = getLinkedRecordIds(getFieldValue(objectiveRecord.fields, "Project"));
+  if (!objectiveProjectIds.includes(projectId)) {
+    throw new Error("El Objective seleccionado no pertenece al Project indicado.");
+  }
+
+  const record = await createAirtableRecord(
+    agileConnection.keyResultTableName,
+    compactAirtableCreateFields({
+      "Current Value": currentValue,
+      "Explanation": input.explanation?.trim() ?? "",
+      "Initial Value": initialValue,
+      "Key Result": keyResult,
+      "Metric": input.metric?.trim() ?? "",
+      "Name": keyResult,
+      "Objetive": [objectiveId],
+      "Progress": progress === null ? null : progress / 100,
+      "Progress Number": progress,
+      "Project": [projectId],
+      "Quarter": input.quarter?.trim() ?? "",
+      "Status": status,
+      "Target Date": input.targetDate?.trim() || null,
+      "Target Value": targetValue
+    }),
+    connection
+  );
+
+  const existingKeyResultIds = getLinkedRecordIds(getFieldValue(objectiveRecord.fields, "Key Results"));
+  await updateAirtableRecord(
+    agileConnection.objectiveTableName,
+    objectiveId,
+    {
+      "Key Results": [...new Set([...existingKeyResultIds, record.id])]
+    },
+    connection
+  );
+
+  return {
+    keyResult: mapAgileKeyResult(record),
+    objectiveId,
+    projectId,
+    tableName: agileConnection.keyResultTableName
+  };
+}
+
+export async function createAgileKeyProject(input: CreateAgileKeyProjectInput) {
+  const agileConnection = getAgileAirtableConnection();
+  const name = requireNonEmptyString(input.name, "Key Project Name");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const status = getOptionalKeyProjectStatus(input.status) ?? "Suggested by Resource";
+
+  const record = await createAirtableRecord(
+    agileConnection.keyProjectTableName,
+    compactAirtableCreateFields({
+      "Don't Show In Singular Stories": input.dontShowInSingularStories === true,
+      "Epic Name": name,
+      "Epic Story": input.epicStory?.trim() ?? "",
+      "Justification": input.justification?.trim() ?? "",
+      "Projects": [projectId],
+      "Status": status,
+      "Total Stories": input.totalStories ?? null
+    }),
+    {
+      apiToken: agileConnection.apiToken,
+      baseId: agileConnection.baseId
+    }
+  );
+
+  return {
+    keyProject: mapAgileKeyProject(record),
+    projectId,
+    tableName: agileConnection.keyProjectTableName
+  };
+}
+
 function extractEmailsFromParticipant(value: string) {
   const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
 
@@ -536,7 +2315,12 @@ function buildRecordIdsFilterFormula(recordIds: string[]) {
     .join(",")})`;
 }
 
-async function fetchRecordsByIds(tableName: string, recordIds: string[], fields: string[]) {
+async function fetchRecordsByIds(
+  tableName: string,
+  recordIds: string[],
+  fields: string[],
+  connection?: { apiToken: string; baseId: string }
+) {
   const uniqueIds = [...new Set(recordIds.filter((recordId) => recordId.trim().length > 0))];
 
   if (uniqueIds.length === 0) {
@@ -546,6 +2330,8 @@ async function fetchRecordsByIds(tableName: string, recordIds: string[], fields:
   const records = await Promise.all(
     chunkArray(uniqueIds, 25).map((recordIdChunk) =>
       fetchAirtableRecords(tableName, {
+        apiToken: connection?.apiToken,
+        baseId: connection?.baseId,
         fields,
         filterByFormula: buildRecordIdsFilterFormula(recordIdChunk)
       })
@@ -558,11 +2344,14 @@ async function fetchRecordsByIds(tableName: string, recordIds: string[], fields:
 async function updateAirtableRecord(
   tableName: string,
   recordId: string,
-  fields: TrustworthinessRecordUpdateFields
+  fields: Record<string, unknown>,
+  connection?: { apiToken: string; baseId: string }
 ) {
   const airtableConfig = getAirtableConfig();
+  const baseId = connection?.baseId || airtableConfig.airtableBaseId;
+  const apiToken = connection?.apiToken || airtableConfig.airtableApiToken;
   const url = new URL(
-    `https://api.airtable.com/v0/${airtableConfig.airtableBaseId}/${encodeURIComponent(tableName)}/${encodeURIComponent(recordId)}`
+    `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}/${encodeURIComponent(recordId)}`
   );
 
   const response = await fetch(url, {
@@ -571,7 +2360,7 @@ async function updateAirtableRecord(
       typecast: true
     }),
     headers: {
-      Authorization: `Bearer ${airtableConfig.airtableApiToken}`,
+      Authorization: `Bearer ${apiToken}`,
       "Content-Type": "application/json"
     },
     method: "PATCH"
@@ -579,6 +2368,7 @@ async function updateAirtableRecord(
 
   if (!response.ok) {
     let details = "";
+    let syncedTableError: string | null = null;
 
     try {
       const payload = (await response.json()) as {
@@ -592,11 +2382,74 @@ async function updateAirtableRecord(
         : payload.error?.type
           ? `: ${payload.error.type}`
           : "";
+
+      if (payload.error?.message?.toLowerCase().includes("externally synced")) {
+        throw new Error(
+          `La tabla ${tableName} en Airtable está sincronizada externamente y no permite crear registros desde la API. Crea el registro en la tabla fuente o configura una tabla editable para OKRs.`
+        );
+      }
     } catch {
       details = "";
     }
 
     throw new Error(`Airtable request failed for table ${tableName} with status ${response.status}${details}`);
+  }
+
+  return (await response.json()) as AirtableRecord;
+}
+
+async function createAirtableRecord(
+  tableName: string,
+  fields: Record<string, unknown>,
+  connection?: { apiToken: string; baseId: string }
+) {
+  const airtableConfig = getAirtableConfig();
+  const baseId = connection?.baseId || airtableConfig.airtableBaseId;
+  const apiToken = connection?.apiToken || airtableConfig.airtableApiToken;
+  const url = new URL(
+    `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}`
+  );
+
+  const response = await fetch(url, {
+    body: JSON.stringify({
+      fields,
+      typecast: true
+    }),
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    let details = "";
+    let syncedTableError: string | null = null;
+
+    try {
+      const payload = (await response.json()) as {
+        error?: {
+          message?: string;
+          type?: string;
+        };
+      };
+      details = payload.error?.message
+        ? `: ${payload.error.message}`
+        : payload.error?.type
+          ? `: ${payload.error.type}`
+          : "";
+      if (payload.error?.message?.toLowerCase().includes("externally synced")) {
+        syncedTableError = `La tabla ${tableName} en Airtable está sincronizada externamente y no permite crear registros desde la API. Crea el registro en la tabla fuente o configura una tabla editable para OKRs.`;
+      }
+    } catch {
+      details = "";
+    }
+
+    if (syncedTableError) {
+      throw new Error(syncedTableError);
+    }
+
+    throw new Error(`Airtable create failed for table ${tableName} with status ${response.status}${details}`);
   }
 
   return (await response.json()) as AirtableRecord;
@@ -1026,7 +2879,7 @@ export async function updateTrustworthinessRecord(
     throw new Error("No fue posible hidratar la evaluación actualizada.");
   }
 
-  return hydratedRecord;
+  return mergeTrustworthinessRecordFields(hydratedRecord, fields);
 }
 
 function getTrustworthinessRecordEvaluatedEmail(record: AirtableRecord) {
@@ -1088,14 +2941,15 @@ function validateAssistantSaveContext(
 function mergeSavedAssistantProposalIntoRecord(
   record: AirtableRecord,
   proposal: TrustworthinessAssistantProposal,
+  ratingStatus: "Pending" | "Done",
   twSuggestion: Record<string, unknown> | undefined
 ) {
-  const fields: Record<string, unknown> = {
-    ...record.fields,
+  const fields: TrustworthinessRecordUpdateFields = {
     "Credibility Points": proposal.credibilityPoints,
     "Feedback": proposal.feedback,
     "Group Thinking Points": proposal.groupThinkingPoints,
     "Intimacy Points": proposal.intimacyPoints,
+    "Rating Status": ratingStatus,
     "Reliability Points": proposal.reliabilityPoints
   };
   const credibilityAiJson = getAssistantSuggestionPillarJson(twSuggestion, "credibility");
@@ -1119,10 +2973,7 @@ function mergeSavedAssistantProposalIntoRecord(
     fields["Reliability AI JSON"] = reliabilityAiJson;
   }
 
-  return {
-    ...record,
-    fields
-  };
+  return mergeTrustworthinessRecordFields(record, fields);
 }
 
 export async function saveTrustworthinessAssistantProposal(
@@ -1205,7 +3056,12 @@ export async function saveTrustworthinessAssistantProposal(
     throw new Error("No fue posible hidratar la evaluación actualizada.");
   }
 
-  return mergeSavedAssistantProposalIntoRecord(hydratedRecord, proposal, input.twSuggestion);
+  return mergeSavedAssistantProposalIntoRecord(
+    hydratedRecord,
+    proposal,
+    normalizedStatus,
+    input.twSuggestion
+  );
 }
 
 export async function listCoachingInputLogs(
@@ -1437,6 +3293,88 @@ function getPillarMeaning(pillar: PillarKey, points: number) {
   return TALENT_PILLAR_MEANINGS[pillar][Math.max(1, Math.min(10, points)) - 1];
 }
 
+function getFirstNumericValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+
+  if (typeof value === "string") {
+    const parsedValue = Number(value);
+
+    if (Number.isFinite(parsedValue)) {
+      return Math.round(parsedValue);
+    }
+  }
+
+  return null;
+}
+
+function mergeTrustworthinessRecordFields(
+  record: AirtableRecord,
+  fields: Partial<Record<keyof TrustworthinessRecordUpdateFields, unknown>>
+) {
+  const nextFields: Record<string, unknown> = {
+    ...record.fields,
+    ...fields
+  };
+  const reliabilityPoints = getFirstNumericValue(nextFields["Reliability Points"]);
+  const intimacyPoints = getFirstNumericValue(nextFields["Intimacy Points"]);
+  const groupThinkingPoints = getFirstNumericValue(nextFields["Group Thinking Points"]);
+  const credibilityPoints = getFirstNumericValue(nextFields["Credibility Points"]);
+
+  if (typeof reliabilityPoints === "number") {
+    nextFields["Reliability Meaning"] = getPillarMeaning("reliability", reliabilityPoints);
+  } else {
+    delete nextFields["Reliability Meaning"];
+  }
+
+  if (typeof intimacyPoints === "number") {
+    nextFields["Intimacy Meaning"] = getPillarMeaning("intimacy", intimacyPoints);
+  } else {
+    delete nextFields["Intimacy Meaning"];
+  }
+
+  if (typeof groupThinkingPoints === "number") {
+    nextFields["Group Thinking Meaning"] = getPillarMeaning(
+      "groupThinking",
+      groupThinkingPoints
+    );
+  } else {
+    delete nextFields["Group Thinking Meaning"];
+  }
+
+  if (typeof credibilityPoints === "number") {
+    nextFields["Credibility Meaning"] = getPillarMeaning("credibility", credibilityPoints);
+  } else {
+    delete nextFields["Credibility Meaning"];
+  }
+
+  if (
+    typeof reliabilityPoints === "number" &&
+    typeof intimacyPoints === "number" &&
+    typeof groupThinkingPoints === "number" &&
+    typeof credibilityPoints === "number"
+  ) {
+    const trustworthinessScore = calculateTrustworthinessScore({
+      credibility: credibilityPoints,
+      groupThinking: groupThinkingPoints,
+      intimacy: intimacyPoints,
+      reliability: reliabilityPoints
+    });
+
+    nextFields["Trustworthiness"] = trustworthinessScore;
+    nextFields["Trustworthiness Meaning"] = getTrustworthinessMeaning(trustworthinessScore);
+  } else {
+    delete nextFields["Trustworthiness"];
+    delete nextFields["Trustworthiness Meaning"];
+  }
+
+  return {
+    ...record,
+    fields: nextFields
+  };
+}
+
 function calculateTrustworthinessScore(points: Record<PillarKey, number>) {
   return (
     points.credibility +
@@ -1513,6 +3451,30 @@ function createProposalFromSuggestion(
   };
 }
 
+function normalizeAssistantHistory(
+  history: Array<{
+    content: string;
+    role: "assistant" | "user";
+  }> | undefined
+) {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  return history
+    .filter(
+      (message): message is { content: string; role: "assistant" | "user" } =>
+        (message.role === "assistant" || message.role === "user") &&
+        typeof message.content === "string" &&
+        message.content.trim().length > 0
+    )
+    .map((message) => ({
+      content: message.content.trim(),
+      role: message.role
+    }))
+    .slice(-ASSISTANT_HISTORY_LIMIT);
+}
+
 function createFeedbackInputFromSuggestion(params: {
   evaluatedName: string;
   existingFeedback?: string | null;
@@ -1550,10 +3512,14 @@ function createFeedbackInputFromSuggestion(params: {
   };
 }
 
-function createSuggestionPrompt(meetings: CoachingEvidenceMeeting[]) {
+function createSuggestionPrompt(meetings: CoachingEvidenceMeeting[], existingFeedback?: string | null) {
+  const normalizedFeedback = existingFeedback?.trim();
+
   return [
     "Generate JSON only. You are assisting a human evaluator with Monthly Trustworthiness for a talent.",
     "Use only the supplied meeting evidence. Do not invent evidence, events, names, or scores.",
+    "Use the evaluator's existing feedback as an additional human judgment signal when calibrating the TW score and pillars.",
+    "Do not quote the feedback verbatim unless it is necessary; reconcile it with meeting evidence and call out uncertainty if they conflict.",
     "The four TW pillars are Reliability, Intimacy, Group Thinking, and Credibility.",
     "Formula context: TW = (Credibility + Reliability + 2*Intimacy + 2*Group Thinking) / 60.",
     "Reliability: commitments, deadlines, consistency, decision documentation, risk handling.",
@@ -1562,6 +3528,23 @@ function createSuggestionPrompt(meetings: CoachingEvidenceMeeting[]) {
     "Credibility: knowledge, competence, judgment, clear ownership, confidence generated.",
     "Return integer points 1-10 per pillar. Include concrete evidence by meeting and source type.",
     "Separate positive signals, negative signals/risks, uncertainty, and metric inputs.",
+    `Evaluator feedback draft:\n${normalizedFeedback && normalizedFeedback.length > 0 ? normalizedFeedback : "None provided."}`,
+    `Evidence package:\n${JSON.stringify(meetings, null, 2)}`
+  ].join("\n\n");
+}
+
+function createSuggestionTracePrompt(meetings: CoachingEvidenceMeeting[], existingFeedback?: string | null) {
+  const normalizedFeedback = existingFeedback?.trim();
+
+  return [
+    "You are preparing a visible decision trace for a Monthly Trustworthiness evaluation.",
+    "Reply in Spanish.",
+    "Use only the supplied meeting evidence and evaluator feedback draft.",
+    "Return 3 to 5 short bullet lines.",
+    "Each line must start with '- '.",
+    "Each bullet should mention one concrete positive signal, risk, contradiction, or calibration insight across the TW pillars.",
+    "Do not return JSON, headings, numbering, or markdown other than bullet lines.",
+    `Evaluator feedback draft:\n${normalizedFeedback && normalizedFeedback.length > 0 ? normalizedFeedback : "None provided."}`,
     `Evidence package:\n${JSON.stringify(meetings, null, 2)}`
   ].join("\n\n");
 }
@@ -1704,7 +3687,8 @@ const TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA = {
     "needsOptionalEvidence",
     "evidenceQuestion",
     "proposal",
-    "citations"
+    "citations",
+    "decisionTrace"
   ],
   properties: {
     message: {
@@ -1786,6 +3770,10 @@ const TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA = {
           }
         }
       }
+    },
+    decisionTrace: {
+      type: "array",
+      items: { type: "string" }
     }
   }
 };
@@ -1812,6 +3800,312 @@ function extractOpenAIOutputText(payload: unknown) {
   }
 
   return null;
+}
+
+function extractDeepSeekOutputText(payload: unknown) {
+  if (!isPlainRecord(payload) || !Array.isArray(payload.choices)) {
+    return null;
+  }
+
+  const [firstChoice] = payload.choices;
+
+  if (!isPlainRecord(firstChoice) || !isPlainRecord(firstChoice.message)) {
+    return null;
+  }
+
+  return typeof firstChoice.message.content === "string"
+    ? firstChoice.message.content
+    : null;
+}
+
+async function streamOpenAIResponsesText(params: {
+  apiKey: string;
+  input: string;
+  model: string;
+  reasoningEffort?: string;
+  handlers: OpenAITextStreamHandlers;
+}) {
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    body: JSON.stringify({
+      input: params.input,
+      model: params.model,
+      reasoning: params.reasoningEffort
+        ? {
+            effort: params.reasoningEffort
+          }
+        : undefined,
+      stream: true
+    }),
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok || !response.body) {
+    let message = `OpenAI request failed with status ${response.status}`;
+
+    try {
+      const payload = (await response.json()) as { error?: { message?: string } };
+      if (payload.error?.message) {
+        message = payload.error.message;
+      }
+    } catch {
+      message = `OpenAI request failed with status ${response.status}`;
+    }
+
+    throw new Error(message);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulatedText = "";
+
+  async function processChunk(chunk: string) {
+    const lines = chunk.split("\n");
+    let eventType = "";
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
+        continue;
+      }
+
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    const data = dataLines.join("\n");
+
+    if (!data || data === "[DONE]") {
+      return;
+    }
+
+    const payload = JSON.parse(data) as {
+      delta?: string;
+      error?: { message?: string };
+      response?: unknown;
+      type?: string;
+    };
+    const payloadType = typeof payload.type === "string" ? payload.type : eventType;
+
+    if (payloadType === "response.output_text.delta" && typeof payload.delta === "string") {
+      accumulatedText += payload.delta;
+      await params.handlers.onDelta?.(payload.delta);
+      return;
+    }
+
+    if (payloadType === "error") {
+      throw new Error(payload.error?.message ?? "No fue posible stream la respuesta de OpenAI.");
+    }
+
+    if (
+      payloadType === "response.completed" ||
+      payloadType === "response.done" ||
+      payloadType === "response.output_text.done"
+    ) {
+      const completedText =
+        extractOpenAIOutputText(payload.response) ??
+        (typeof payload.delta === "string" ? `${accumulatedText}${payload.delta}` : accumulatedText);
+
+      if (completedText.length > 0) {
+        accumulatedText = completedText;
+      }
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+
+    for (const chunk of chunks) {
+      const trimmedChunk = chunk.trim();
+
+      if (trimmedChunk.length === 0) {
+        continue;
+      }
+
+      await processChunk(trimmedChunk);
+    }
+  }
+
+  if (buffer.trim().length > 0) {
+    await processChunk(buffer.trim());
+  }
+
+  if (accumulatedText.length > 0) {
+    await params.handlers.onCompleted?.(accumulatedText);
+  }
+
+  return accumulatedText;
+}
+
+async function callOpenAIResponsesJson(params: {
+  apiKey: string;
+  input: string;
+  model: string;
+  reasoningEffort?: string;
+  schema: Record<string, unknown>;
+  schemaName: string;
+}) {
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    body: JSON.stringify({
+      input: params.input,
+      model: params.model,
+      reasoning: params.reasoningEffort
+        ? {
+            effort: params.reasoningEffort
+          }
+        : undefined,
+      text: {
+        format: {
+          type: "json_schema",
+          name: params.schemaName,
+          strict: true,
+          schema: params.schema
+        }
+      }
+    }),
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    let message = `OpenAI request failed with status ${response.status}`;
+
+    try {
+      const payload = (await response.json()) as { error?: { message?: string } };
+      if (payload.error?.message) {
+        message = payload.error.message;
+      }
+    } catch {
+      message = `OpenAI request failed with status ${response.status}`;
+    }
+
+    throw new Error(message);
+  }
+
+  return extractOpenAIOutputText(await response.json());
+}
+
+async function callDeepSeekChatJson(params: {
+  apiKey: string;
+  baseUrl: string;
+  input: string;
+  model: string;
+}) {
+  const response = await fetch(`${params.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    body: JSON.stringify({
+      messages: [
+        {
+          content:
+            "Return valid JSON only. Do not include markdown fences, comments, or explanatory text.",
+          role: "system"
+        },
+        {
+          content: params.input,
+          role: "user"
+        }
+      ],
+      model: params.model,
+      max_tokens: 8000,
+      response_format: {
+        type: "json_object"
+      },
+      stream: false
+    }),
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    let message = `DeepSeek request failed with status ${response.status}`;
+
+    try {
+      const payload = (await response.json()) as { error?: { message?: string } };
+      if (payload.error?.message) {
+        message = payload.error.message;
+      }
+    } catch {
+      message = `DeepSeek request failed with status ${response.status}`;
+    }
+
+    throw new Error(message);
+  }
+
+  return extractDeepSeekOutputText(await response.json());
+}
+
+async function callConfiguredModelForJson(params: {
+  input: string;
+  model: string;
+  schema: Record<string, unknown>;
+  schemaName: string;
+}) {
+  const openAIConfig = getOpenAIConfig();
+
+  if (!openAIConfig.apiKey || !params.model) {
+    throw new Error("No hay modelo configurado para generar JSON con IA.");
+  }
+
+  if (openAIConfig.provider === "deepseek") {
+    return callDeepSeekChatJson({
+      apiKey: openAIConfig.apiKey,
+      baseUrl: openAIConfig.deepSeekBaseUrl,
+      input: params.input,
+      model: params.model
+    });
+  }
+
+  return callOpenAIResponsesJson({
+    apiKey: openAIConfig.apiKey,
+    input: params.input,
+    model: params.model,
+    reasoningEffort: openAIConfig.reasoningEffort,
+    schema: params.schema,
+    schemaName: params.schemaName
+  });
+}
+
+async function streamConfiguredModelText(params: {
+  input: string;
+  model: string;
+  handlers: OpenAITextStreamHandlers;
+}) {
+  const openAIConfig = getOpenAIConfig();
+
+  if (!openAIConfig.apiKey || !params.model) {
+    throw new Error("No hay modelo configurado para generar streaming con IA.");
+  }
+
+  if (openAIConfig.provider !== "openai") {
+    return "";
+  }
+
+  return streamOpenAIResponsesText({
+    apiKey: openAIConfig.apiKey,
+    handlers: params.handlers,
+    input: params.input,
+    model: params.model,
+    reasoningEffort: openAIConfig.reasoningEffort
+  });
 }
 
 function normalizeConfidence(value: unknown, meetingsUsed: number): Confidence {
@@ -1863,50 +4157,20 @@ function validatePillarSuggestion(value: unknown, pillar: PillarKey, meetingsUse
   };
 }
 
-async function callOpenAIForSuggestion(meetings: CoachingEvidenceMeeting[]) {
+async function callOpenAIForSuggestion(meetings: CoachingEvidenceMeeting[], existingFeedback?: string | null) {
   const openAIConfig = getOpenAIConfig();
+  const suggestionModel = openAIConfig.suggestionModel || openAIConfig.model;
 
-  if (!openAIConfig.apiKey || !openAIConfig.model) {
+  if (!openAIConfig.apiKey || !suggestionModel) {
     throw new Error("No hay modelo configurado para generar sugerencias.");
   }
 
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    body: JSON.stringify({
-      input: createSuggestionPrompt(meetings),
-      model: openAIConfig.model,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "tw_suggestion",
-          strict: true,
-          schema: TW_SUGGESTION_SCHEMA
-        }
-      }
-    }),
-    headers: {
-      Authorization: `Bearer ${openAIConfig.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    method: "POST"
+  const outputText = await callConfiguredModelForJson({
+    input: createSuggestionPrompt(meetings, existingFeedback),
+    model: suggestionModel,
+    schema: TW_SUGGESTION_SCHEMA,
+    schemaName: "tw_suggestion"
   });
-
-  if (!response.ok) {
-    let message = `OpenAI request failed with status ${response.status}`;
-
-    try {
-      const payload = (await response.json()) as { error?: { message?: string } };
-      if (payload.error?.message) {
-        message = payload.error.message;
-      }
-    } catch {
-      message = `OpenAI request failed with status ${response.status}`;
-    }
-
-    throw new Error(message);
-  }
-
-  const payload = await response.json();
-  const outputText = extractOpenAIOutputText(payload);
 
   if (!outputText) {
     throw new Error("No fue posible generar una sugerencia estructurada. Intenta regenerar.");
@@ -1917,6 +4181,56 @@ async function callOpenAIForSuggestion(meetings: CoachingEvidenceMeeting[]) {
   } catch {
     throw new Error("No fue posible generar una sugerencia estructurada. Intenta regenerar.");
   }
+}
+
+async function streamSuggestionTraceFromMeetings(params: {
+  emitTrace?: TrustworthinessSuggestionTraceEmitter;
+  existingFeedback?: string | null;
+  meetings: CoachingEvidenceMeeting[];
+}) {
+  const openAIConfig = getOpenAIConfig();
+  const suggestionModel = openAIConfig.suggestionModel || openAIConfig.model;
+
+  if (!params.emitTrace || !openAIConfig.apiKey || !suggestionModel) {
+    return "";
+  }
+
+  let traceBuffer = "";
+
+  function flushCompletedTraceLines() {
+    const normalizedBuffer = traceBuffer.replace(/\r/g, "");
+    const lines = normalizedBuffer.split("\n");
+    traceBuffer = lines.pop() ?? "";
+
+    return lines
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("- "))
+      .map((line) => line.slice(2).trim())
+      .filter((line) => line.length > 0);
+  }
+
+  const streamedText = await streamConfiguredModelText({
+    handlers: {
+      onCompleted: async () => {
+        const remainingLine = traceBuffer.trim();
+
+        if (remainingLine.startsWith("- ")) {
+          await params.emitTrace?.(remainingLine.slice(2).trim());
+        }
+      },
+      onDelta: async (delta) => {
+        traceBuffer += delta;
+
+        for (const line of flushCompletedTraceLines()) {
+          await params.emitTrace?.(line);
+        }
+      }
+    },
+    input: createSuggestionTracePrompt(params.meetings, params.existingFeedback),
+    model: suggestionModel
+  });
+
+  return streamedText;
 }
 
 function createFeedbackPrompt(input: FeedbackGenerationInput) {
@@ -1972,48 +4286,19 @@ function createFeedbackPrompt(input: FeedbackGenerationInput) {
 
 async function callOpenAIForFeedback(input: FeedbackGenerationInput) {
   const openAIConfig = getOpenAIConfig();
+  const feedbackModel =
+    openAIConfig.feedbackModel || openAIConfig.assistantModel || openAIConfig.model;
 
-  if (!openAIConfig.apiKey || !openAIConfig.model) {
+  if (!openAIConfig.apiKey || !feedbackModel) {
     throw new Error("No hay modelo configurado para generar feedback.");
   }
 
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    body: JSON.stringify({
-      input: createFeedbackPrompt(input),
-      model: openAIConfig.model,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "tw_feedback",
-          strict: true,
-          schema: FEEDBACK_SUGGESTION_SCHEMA
-        }
-      }
-    }),
-    headers: {
-      Authorization: `Bearer ${openAIConfig.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    method: "POST"
+  const outputText = await callConfiguredModelForJson({
+    input: createFeedbackPrompt(input),
+    model: feedbackModel,
+    schema: FEEDBACK_SUGGESTION_SCHEMA,
+    schemaName: "tw_feedback"
   });
-
-  if (!response.ok) {
-    let message = `OpenAI request failed with status ${response.status}`;
-
-    try {
-      const payload = (await response.json()) as { error?: { message?: string } };
-      if (payload.error?.message) {
-        message = payload.error.message;
-      }
-    } catch {
-      message = `OpenAI request failed with status ${response.status}`;
-    }
-
-    throw new Error(message);
-  }
-
-  const payload = await response.json();
-  const outputText = extractOpenAIOutputText(payload);
 
   if (!outputText) {
     throw new Error("No fue posible generar el feedback con IA.");
@@ -2132,6 +4417,17 @@ function validateAssistantCitations(value: unknown): TrustworthinessAssistantCit
     .slice(0, 6);
 }
 
+function validateDecisionTrace(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0)
+    .slice(0, 5);
+}
+
 function normalizeAssistantChangeSource(
   value: unknown,
   proposalChanged: boolean
@@ -2148,13 +4444,159 @@ function normalizeAssistantChangeSource(
   return proposalChanged ? "mixed" : "none";
 }
 
+function truncateAssistantText(value: string | null | undefined, limit = ASSISTANT_TEXT_LIMIT) {
+  const normalizedValue = typeof value === "string" ? value.trim() : "";
+
+  if (normalizedValue.length <= limit) {
+    return normalizedValue || null;
+  }
+
+  return `${normalizedValue.slice(0, limit).trimEnd()}...`;
+}
+
+function compactAssistantList(values: string[], limit: number, textLimit = ASSISTANT_SHORT_TEXT_LIMIT) {
+  return values
+    .map((value) => truncateAssistantText(value, textLimit))
+    .filter((value): value is string => Boolean(value))
+    .slice(0, limit);
+}
+
+function compactAssistantMetrics(metricsScores: Record<string, number | null>) {
+  return Object.fromEntries(
+    Object.entries(metricsScores)
+      .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+      .slice(0, 12)
+  );
+}
+
+function compactAssistantMeetings(meetings: TrustworthinessAssistantMeeting[]) {
+  return meetings.slice(0, ASSISTANT_MEETING_LIMIT).map((meeting) => ({
+    actionItems: compactAssistantList(meeting.actionItems, 5),
+    coachingAnalysis: truncateAssistantText(meeting.coachingAnalysis),
+    coachingSummary: truncateAssistantText(meeting.coachingSummary),
+    meetingDatetime: meeting.meetingDatetime,
+    meetingId: meeting.meetingId,
+    metricsScores: compactAssistantMetrics(meeting.metricsScores),
+    title: truncateAssistantText(meeting.title, ASSISTANT_SHORT_TEXT_LIMIT) ?? "Reunión sin título",
+    topics: compactAssistantList(meeting.topics, 8, 120),
+    transcriptSummary: truncateAssistantText(meeting.transcriptSummary)
+  }));
+}
+
+function compactAssistantSignal(value: unknown) {
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+
+  return {
+    evidenceText: truncateAssistantText(
+      typeof value.evidenceText === "string" ? value.evidenceText : null,
+      ASSISTANT_SHORT_TEXT_LIMIT
+    ),
+    impact: typeof value.impact === "string" ? value.impact : null,
+    interpretation: truncateAssistantText(
+      typeof value.interpretation === "string" ? value.interpretation : null,
+      ASSISTANT_SHORT_TEXT_LIMIT
+    ),
+    meetingId: typeof value.meetingId === "string" ? value.meetingId : null,
+    meetingTitle: truncateAssistantText(
+      typeof value.meetingTitle === "string" ? value.meetingTitle : null,
+      ASSISTANT_SHORT_TEXT_LIMIT
+    ),
+    sourceType: typeof value.sourceType === "string" ? value.sourceType : null
+  };
+}
+
+function compactAssistantSuggestion(input: Record<string, unknown>) {
+  const pillars = isPlainRecord(input.pillars) ? input.pillars : {};
+
+  return {
+    generatedAt: typeof input.generatedAt === "string" ? input.generatedAt : null,
+    meetingsUsed: typeof input.meetingsUsed === "number" ? input.meetingsUsed : null,
+    pillars: Object.fromEntries(
+      (["reliability", "intimacy", "groupThinking", "credibility"] as PillarKey[]).map(
+        (pillarKey) => {
+          const pillar = isPlainRecord(pillars[pillarKey]) ? pillars[pillarKey] : {};
+          const decisionDetail = isPlainRecord(pillar.decisionDetail)
+            ? pillar.decisionDetail
+            : {};
+
+          return [
+            pillarKey,
+            {
+              confidence: typeof pillar.confidence === "string" ? pillar.confidence : null,
+              conclusion: truncateAssistantText(
+                typeof decisionDetail.conclusion === "string"
+                  ? decisionDetail.conclusion
+                  : null
+              ),
+              meaning: typeof pillar.meaning === "string" ? pillar.meaning : null,
+              negativeSignals: Array.isArray(decisionDetail.negativeSignals)
+                ? decisionDetail.negativeSignals
+                    .map(compactAssistantSignal)
+                    .filter(Boolean)
+                    .slice(0, 3)
+                : [],
+              points: typeof pillar.points === "number" ? pillar.points : null,
+              positiveSignals: Array.isArray(decisionDetail.positiveSignals)
+                ? decisionDetail.positiveSignals
+                    .map(compactAssistantSignal)
+                    .filter(Boolean)
+                    .slice(0, 3)
+                : [],
+              shortReason: truncateAssistantText(
+                typeof pillar.shortReason === "string" ? pillar.shortReason : null
+              ),
+              uncertainty: Array.isArray(decisionDetail.uncertainty)
+                ? compactAssistantList(decisionDetail.uncertainty, 3)
+                : []
+            }
+          ];
+        }
+      )
+    ),
+    trustworthiness: isPlainRecord(input.trustworthiness)
+      ? {
+          confidence:
+            typeof input.trustworthiness.confidence === "string"
+              ? input.trustworthiness.confidence
+              : null,
+          explanation: truncateAssistantText(
+            typeof input.trustworthiness.explanation === "string"
+              ? input.trustworthiness.explanation
+              : null
+          ),
+          meaning:
+            typeof input.trustworthiness.meaning === "string"
+              ? input.trustworthiness.meaning
+              : null,
+          percentage:
+            typeof input.trustworthiness.percentage === "string"
+              ? input.trustworthiness.percentage
+              : null,
+          score:
+            typeof input.trustworthiness.score === "number"
+              ? input.trustworthiness.score
+              : null
+        }
+      : null
+  };
+}
+
 function createTrustworthinessAssistantPrompt(
   input: TrustworthinessAssistantConversationInput
 ) {
   const recentHistory = input.history
-    .slice(-10)
-    .map((message) => `${message.role === "assistant" ? "ASSISTANT" : "USER"}: ${message.content}`)
+    .slice(-ASSISTANT_HISTORY_LIMIT)
+    .map(
+      (message) =>
+        `${message.role === "assistant" ? "ASSISTANT" : "USER"}: ${
+          truncateAssistantText(message.content, ASSISTANT_TEXT_LIMIT) ?? ""
+        }`
+    )
     .join("\n\n");
+  const compactSuggestion = compactAssistantSuggestion(input.suggestion);
+  const compactMeetings = compactAssistantMeetings(input.meetings);
 
   return [
     "You are Asistente de Revision TW (agent id: asistente-revision-tw).",
@@ -2174,6 +4616,7 @@ function createTrustworthinessAssistantPrompt(
     "Be concise, useful, and grounded in the evidence.",
     "Set proposalChanged to true only when the returned proposal differs from the current proposal.",
     "Include citations for meeting evidence you reference. Use only meeting ids and titles present in Meeting evidence JSON.",
+    "Return decisionTrace as 2-5 short Spanish bullets for the evaluator. Summarize evidence comparison and final calibration. Do not reveal hidden chain-of-thought.",
     "If the user clearly approves, confirms, or asks to continue/apply/save, set nextIntent to save.",
     "If the user wants to discuss one pillar, set nextIntent to edit_pillar and focusArea to that pillar.",
     "If the user wants to adjust the narrative or general feedback, set nextIntent to edit_feedback and focusArea to feedback.",
@@ -2188,11 +4631,11 @@ function createTrustworthinessAssistantPrompt(
         : "No project context available"
     }`,
     "",
-    `Current suggestion JSON:\n${JSON.stringify(input.suggestion, null, 2)}`,
+    `Current suggestion JSON:\n${JSON.stringify(compactSuggestion, null, 2)}`,
     "",
     `Current proposal JSON:\n${JSON.stringify(input.proposal, null, 2)}`,
     "",
-    `Meeting evidence JSON:\n${JSON.stringify(input.meetings, null, 2)}`,
+    `Meeting evidence JSON:\n${JSON.stringify(compactMeetings, null, 2)}`,
     "",
     `Conversation so far:\n${recentHistory || "No previous messages."}`,
     "",
@@ -2202,52 +4645,68 @@ function createTrustworthinessAssistantPrompt(
   ].join("\n");
 }
 
+function createTrustworthinessAssistantVisiblePrompt(
+  input: TrustworthinessAssistantConversationInput
+) {
+  const recentHistory = input.history
+    .slice(-ASSISTANT_HISTORY_LIMIT)
+    .map(
+      (message) =>
+        `${message.role === "assistant" ? "ASSISTANT" : "USER"}: ${
+          truncateAssistantText(message.content, ASSISTANT_TEXT_LIMIT) ?? ""
+        }`
+    )
+    .join("\n\n");
+  const compactSuggestion = compactAssistantSuggestion(input.suggestion);
+  const compactMeetings = compactAssistantMeetings(input.meetings);
+
+  return [
+    "You are Asistente de Revision TW (agent id: asistente-revision-tw).",
+    "Write the visible chat answer only.",
+    "Reply in Spanish markdown.",
+    "Use only the supplied meeting evidence, suggestion data, current proposal, and explicit human evaluator input.",
+    "Do not invent meetings, facts, or outcomes.",
+    "Do not return JSON.",
+    "Do not expose hidden chain-of-thought.",
+    "Do not include a separate reasoning section, citations list, or save confirmation claim.",
+    "Be concise and useful. If the evaluator asks for an adjustment, explain it naturally in the reply.",
+    "",
+    `Evaluated person: ${input.evaluatedName}`,
+    `Role: ${input.roleLabel && input.roleLabel.trim().length > 0 ? input.roleLabel : "Unknown"}`,
+    `Project context: ${
+      input.projectContext && input.projectContext.trim().length > 0
+        ? input.projectContext
+        : "No project context available"
+    }`,
+    "",
+    `Current suggestion JSON:\n${JSON.stringify(compactSuggestion, null, 2)}`,
+    "",
+    `Current proposal JSON:\n${JSON.stringify(input.proposal, null, 2)}`,
+    "",
+    `Meeting evidence JSON:\n${JSON.stringify(compactMeetings, null, 2)}`,
+    "",
+    `Conversation so far:\n${recentHistory || "No previous messages."}`,
+    "",
+    `Latest user message:\n${input.prompt}`
+  ].join("\n");
+}
+
 async function callOpenAIForTrustworthinessAssistant(
   input: TrustworthinessAssistantConversationInput
 ) {
   const openAIConfig = getOpenAIConfig();
+  const assistantModel = openAIConfig.assistantModel || openAIConfig.model;
 
-  if (!openAIConfig.apiKey || !openAIConfig.model) {
+  if (!openAIConfig.apiKey || !assistantModel) {
     throw new Error("No hay modelo configurado para conversar sobre TW.");
   }
 
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    body: JSON.stringify({
-      input: createTrustworthinessAssistantPrompt(input),
-      model: openAIConfig.model,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "tw_assistant_reply",
-          strict: true,
-          schema: TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA
-        }
-      }
-    }),
-    headers: {
-      Authorization: `Bearer ${openAIConfig.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    method: "POST"
+  const outputText = await callConfiguredModelForJson({
+    input: createTrustworthinessAssistantPrompt(input),
+    model: assistantModel,
+    schema: TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA,
+    schemaName: "tw_assistant_reply"
   });
-
-  if (!response.ok) {
-    let message = `OpenAI request failed with status ${response.status}`;
-
-    try {
-      const payload = (await response.json()) as { error?: { message?: string } };
-      if (payload.error?.message) {
-        message = payload.error.message;
-      }
-    } catch {
-      message = `OpenAI request failed with status ${response.status}`;
-    }
-
-    throw new Error(message);
-  }
-
-  const payload = await response.json();
-  const outputText = extractOpenAIOutputText(payload);
 
   if (!outputText) {
     throw new Error("No fue posible generar una respuesta del asistente.");
@@ -2257,6 +4716,7 @@ async function callOpenAIForTrustworthinessAssistant(
     const parsedOutput = JSON.parse(outputText) as {
       changeSource?: unknown;
       citations?: unknown;
+      decisionTrace?: unknown;
       evidenceQuestion?: unknown;
       focusArea?: TrustworthinessAssistantFocusArea;
       message?: unknown;
@@ -2305,6 +4765,7 @@ async function callOpenAIForTrustworthinessAssistant(
     return {
       changeSource: normalizeAssistantChangeSource(parsedOutput.changeSource, proposalChanged),
       citations: validateAssistantCitations(parsedOutput.citations),
+      decisionTrace: validateDecisionTrace(parsedOutput.decisionTrace),
       evidenceQuestion,
       focusArea,
       message: parsedOutput.message.trim(),
@@ -2319,6 +4780,26 @@ async function callOpenAIForTrustworthinessAssistant(
   } catch {
     throw new Error("No fue posible generar una respuesta del asistente.");
   }
+}
+
+async function streamTrustworthinessAssistantVisibleMessage(params: {
+  emitDelta?: (delta: string) => void | Promise<void>;
+  input: TrustworthinessAssistantConversationInput;
+}) {
+  const openAIConfig = getOpenAIConfig();
+  const assistantModel = openAIConfig.assistantModel || openAIConfig.model;
+
+  if (!params.emitDelta || !openAIConfig.apiKey || !assistantModel) {
+    return "";
+  }
+
+  return streamConfiguredModelText({
+    handlers: {
+      onDelta: params.emitDelta
+    },
+    input: createTrustworthinessAssistantVisiblePrompt(params.input),
+    model: assistantModel
+  });
 }
 
 export async function getCoachingInputLogTranscript(
@@ -2370,10 +4851,11 @@ export async function getCoachingInputLogTranscript(
 async function generateTrustworthinessSuggestionFromMeetings(
   recordId: string,
   meetings: CoachingEvidenceMeeting[],
-  emitStage?: TrustworthinessSuggestionStageEmitter
+  emitStage?: TrustworthinessSuggestionStageEmitter,
+  existingFeedback?: string | null
 ) {
   await emitStage?.("sending_context_to_ai");
-  const suggestionPayload = await callOpenAIForSuggestion(meetings);
+  const suggestionPayload = await callOpenAIForSuggestion(meetings, existingFeedback);
 
   await emitStage?.("validating_structured_response");
   if (!isPlainRecord(suggestionPayload) || !isPlainRecord(suggestionPayload.pillars)) {
@@ -2436,7 +4918,8 @@ export async function createTrustworthinessSuggestion(
   participantEmail: string,
   activeSessionEmail: string | undefined,
   explicitRange: DateRangeLiteral,
-  emitStage?: TrustworthinessSuggestionStageEmitter
+  emitStage?: TrustworthinessSuggestionStageEmitter,
+  existingFeedback?: string | null
 ) {
   const meetings = await prepareTrustworthinessSuggestionContext(
     participantEmail,
@@ -2445,7 +4928,117 @@ export async function createTrustworthinessSuggestion(
     emitStage
   );
 
-  return generateTrustworthinessSuggestionFromMeetings(recordId, meetings, emitStage);
+  return generateTrustworthinessSuggestionFromMeetings(recordId, meetings, emitStage, existingFeedback);
+}
+
+export async function streamTrustworthinessSuggestion(params: {
+  activeSessionEmail?: string;
+  emitDecisionTrace?: TrustworthinessSuggestionTraceEmitter;
+  emitStage?: TrustworthinessSuggestionStageEmitter;
+  explicitRange: DateRangeLiteral;
+  existingFeedback?: string | null;
+  participantEmail: string;
+  recordId: string;
+}) {
+  const startedAt = Date.now();
+  let contextReadyAt = startedAt;
+  let modelReadyAt = startedAt;
+
+  try {
+    const meetings = await prepareTrustworthinessSuggestionContext(
+      params.participantEmail,
+      params.activeSessionEmail,
+      params.explicitRange,
+      params.emitStage
+    );
+    contextReadyAt = Date.now();
+
+    await params.emitStage?.("sending_context_to_ai");
+    const suggestionPromise = callOpenAIForSuggestion(meetings, params.existingFeedback);
+    const tracePromise = streamSuggestionTraceFromMeetings({
+      emitTrace: params.emitDecisionTrace,
+      existingFeedback: params.existingFeedback,
+      meetings
+    });
+    const [suggestionResult, traceResult] = await Promise.allSettled([
+      suggestionPromise,
+      tracePromise
+    ]);
+    modelReadyAt = Date.now();
+
+    if (traceResult.status === "rejected") {
+      throw traceResult.reason;
+    }
+
+    if (suggestionResult.status === "rejected") {
+      throw suggestionResult.reason;
+    }
+
+    await params.emitStage?.("validating_structured_response");
+    const suggestionPayload = suggestionResult.value;
+
+    if (!isPlainRecord(suggestionPayload) || !isPlainRecord(suggestionPayload.pillars)) {
+      throw new Error("No fue posible generar una sugerencia estructurada. Intenta regenerar.");
+    }
+
+    const pillars = {
+      credibility: validatePillarSuggestion(
+        suggestionPayload.pillars.credibility,
+        "credibility",
+        meetings.length
+      ),
+      groupThinking: validatePillarSuggestion(
+        suggestionPayload.pillars.groupThinking,
+        "groupThinking",
+        meetings.length
+      ),
+      intimacy: validatePillarSuggestion(
+        suggestionPayload.pillars.intimacy,
+        "intimacy",
+        meetings.length
+      ),
+      reliability: validatePillarSuggestion(
+        suggestionPayload.pillars.reliability,
+        "reliability",
+        meetings.length
+      )
+    };
+    await params.emitStage?.("calculating_tw_score");
+    const score = calculateTrustworthinessScore({
+      credibility: pillars.credibility.points,
+      groupThinking: pillars.groupThinking.points,
+      intimacy: pillars.intimacy.points,
+      reliability: pillars.reliability.points
+    });
+    const trustworthiness = isPlainRecord(suggestionPayload.trustworthiness)
+      ? suggestionPayload.trustworthiness
+      : {};
+
+    return {
+      generatedAt: new Date().toISOString(),
+      meetingsUsed: meetings.length,
+      pillars,
+      recordId: params.recordId,
+      trustworthiness: {
+        confidence: normalizeConfidence(trustworthiness.confidence, meetings.length),
+        explanation:
+          typeof trustworthiness.explanation === "string"
+            ? trustworthiness.explanation
+            : "Sugerencia generada a partir de evidencia de reuniones.",
+        meaning: getTrustworthinessMeaning(score),
+        percentage: `${Math.round(score * 100)}%`,
+        score
+      }
+    };
+  } finally {
+    const finishedAt = Date.now();
+    console.info("[tw-suggestion-stream]", {
+      contextMs: contextReadyAt - startedAt,
+      modelMs: modelReadyAt - contextReadyAt,
+      totalMs: finishedAt - startedAt,
+      validationMs: modelReadyAt > 0 ? finishedAt - modelReadyAt : 0
+    });
+  }
 }
 
 export async function createTrustworthinessFeedback(
@@ -2483,33 +5076,86 @@ export async function createTrustworthinessAssistantSession(params: {
   evaluatedName: string;
   evaluatorEmail: string;
   existingFeedback?: string | null;
+  history?: TrustworthinessAssistantHistoryEntry[];
+  meetings?: TrustworthinessAssistantMeeting[];
   participantEmail: string;
+  proposal?: TrustworthinessAssistantProposal;
   projectContext?: string | null;
   recordId: string;
   roleLabel?: string | null;
   start: string;
+  suggestion?: Record<string, unknown>;
 }) {
-  const meetings = await prepareTrustworthinessSuggestionContext(
-    params.participantEmail,
-    params.activeSessionEmail,
-    { end: params.end, start: params.start }
-  );
-  const suggestion = await generateTrustworthinessSuggestionFromMeetings(params.recordId, meetings);
-  const feedback = await createTrustworthinessFeedback(
-    params.recordId,
-    params.evaluatorEmail,
-    createFeedbackInputFromSuggestion({
+  const hasPrebuiltContext = params.suggestion && params.proposal && params.meetings;
+  const meetings = hasPrebuiltContext
+    ? compactAssistantMeetings(params.meetings ?? [])
+    : (await prepareTrustworthinessSuggestionContext(
+        params.participantEmail,
+        params.activeSessionEmail,
+        { end: params.end, start: params.start }
+      )).map(toTrustworthinessAssistantMeeting);
+  const suggestion = hasPrebuiltContext
+    ? params.suggestion ?? {}
+    : await generateTrustworthinessSuggestionFromMeetings(
+        params.recordId,
+        meetings.map((meeting) => ({
+          actionItems: meeting.actionItems,
+          coachingAnalysis: meeting.coachingAnalysis,
+          coachingSummary: meeting.coachingSummary,
+          metricsScores: meeting.metricsScores,
+          rawRecordId: meeting.meetingId,
+          title: meeting.title,
+          topics: meeting.topics,
+          transcriptSummary: meeting.transcriptSummary,
+          when: meeting.meetingDatetime
+        })),
+        undefined,
+        params.existingFeedback
+      );
+  const proposal = hasPrebuiltContext
+    ? validateAssistantProposal(params.proposal as TrustworthinessAssistantProposal)
+    : createProposalFromSuggestion(
+        suggestion as Awaited<ReturnType<typeof createTrustworthinessSuggestion>>,
+        await createTrustworthinessFeedback(
+          params.recordId,
+          params.evaluatorEmail,
+          createFeedbackInputFromSuggestion({
+            evaluatedName: params.evaluatedName,
+            existingFeedback: params.existingFeedback ?? null,
+            projectContext: params.projectContext ?? null,
+            roleLabel: params.roleLabel ?? null,
+            suggestion: suggestion as Awaited<ReturnType<typeof createTrustworthinessSuggestion>>
+          })
+        )
+      );
+  const now = Date.now();
+  const sessionId = randomUUID();
+
+  assistantSessions.set(sessionId, {
+    activeSessionEmail: params.activeSessionEmail,
+    context: {
+      end: params.end,
       evaluatedName: params.evaluatedName,
-      existingFeedback: params.existingFeedback ?? null,
+      evaluatorEmail: params.evaluatorEmail,
+      participantEmail: params.participantEmail,
       projectContext: params.projectContext ?? null,
+      recordId: params.recordId,
       roleLabel: params.roleLabel ?? null,
-      suggestion
-    })
-  );
+      start: params.start
+    },
+    expiresAt: now + ASSISTANT_SESSION_TTL_MS,
+    history: normalizeAssistantHistory(params.history),
+    meetings,
+    proposal,
+    suggestion,
+    updatedAt: now
+  });
 
   return {
-    meetings: meetings.map(toTrustworthinessAssistantMeeting),
-    proposal: createProposalFromSuggestion(suggestion, feedback),
+    expiresAt: new Date(now + ASSISTANT_SESSION_TTL_MS).toISOString(),
+    meetings,
+    proposal,
+    sessionId,
     suggestion
   };
 }
@@ -2526,4 +5172,263 @@ export async function createTrustworthinessAssistantReply(
     prompt: input.prompt.trim(),
     proposal: validateAssistantProposal(input.proposal)
   });
+}
+
+function getAssistantSession(sessionId: string, recordId: string) {
+  const session = assistantSessions.get(sessionId);
+  const now = Date.now();
+
+  if (!session || session.context.recordId !== recordId || session.expiresAt <= now) {
+    if (session) {
+      assistantSessions.delete(sessionId);
+    }
+
+    return null;
+  }
+
+  session.expiresAt = now + ASSISTANT_SESSION_TTL_MS;
+  session.updatedAt = now;
+
+  return session;
+}
+
+function detectAssistantFocus(prompt: string): TrustworthinessAssistantFocusArea {
+  const normalizedPrompt = prompt.toLowerCase();
+
+  if (normalizedPrompt.includes("reliability")) {
+    return "reliability";
+  }
+
+  if (normalizedPrompt.includes("intimacy")) {
+    return "intimacy";
+  }
+
+  if (normalizedPrompt.includes("group thinking") || normalizedPrompt.includes("groupthinking")) {
+    return "groupThinking";
+  }
+
+  if (normalizedPrompt.includes("credibility")) {
+    return "credibility";
+  }
+
+  if (normalizedPrompt.includes("feedback")) {
+    return "feedback";
+  }
+
+  return null;
+}
+
+function searchAssistantMeetingEvidence(
+  meetings: TrustworthinessAssistantMeeting[],
+  focusArea: TrustworthinessAssistantFocusArea,
+  prompt: string
+) {
+  const normalizedPrompt = prompt.toLowerCase();
+  const terms = [
+    focusArea,
+    ...normalizedPrompt
+      .split(/[^a-z0-9áéíóúñü]+/i)
+      .filter((term) => term.length >= 5)
+      .slice(0, 8)
+  ].filter((term): term is string => Boolean(term));
+
+  return meetings
+    .map((meeting) => {
+      const evidenceText = [
+        meeting.coachingSummary,
+        meeting.coachingAnalysis,
+        meeting.transcriptSummary,
+        meeting.topics.join(" "),
+        meeting.actionItems.join(" ")
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const normalizedEvidence = evidenceText.toLowerCase();
+      const score = terms.reduce(
+        (total, term) => total + (normalizedEvidence.includes(term.toLowerCase()) ? 1 : 0),
+        0
+      );
+
+      return {
+        meetingId: meeting.meetingId,
+        meetingTitle: meeting.title,
+        reason:
+          truncateAssistantText(
+            meeting.coachingAnalysis ?? meeting.coachingSummary ?? meeting.transcriptSummary,
+            ASSISTANT_SHORT_TEXT_LIMIT
+          ) ?? "Reunión incluida en el contexto del agente.",
+        score,
+        sourceType: meeting.coachingAnalysis
+          ? "coaching_analysis"
+          : meeting.coachingSummary
+            ? "coaching_summary"
+            : "transcript_summary"
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 4)
+    .map(({ score, ...item }) => item);
+}
+
+export async function streamTrustworthinessAssistantMessage(params: {
+  emit: (event: TrustworthinessAssistantStreamEvent) => void | Promise<void>;
+  prompt: string;
+  rehydrateSession?: TrustworthinessAssistantSessionRehydrateInput;
+  recordId: string;
+  sessionId: string;
+}) {
+  const startedAt = Date.now();
+  const prompt = params.prompt.trim();
+
+  if (!prompt) {
+    throw new Error("El mensaje del usuario es obligatorio para continuar la conversación.");
+  }
+
+  let activeSessionId = params.sessionId;
+  let session = getAssistantSession(activeSessionId, params.recordId);
+
+  if (!session && params.rehydrateSession) {
+    const rehydratedSession = await createTrustworthinessAssistantSession({
+      activeSessionEmail: params.rehydrateSession.activeSessionEmail,
+      end: params.rehydrateSession.end,
+      evaluatedName: params.rehydrateSession.evaluatedName,
+      evaluatorEmail: params.rehydrateSession.evaluatorEmail,
+      history: params.rehydrateSession.history,
+      meetings: params.rehydrateSession.meetings,
+      participantEmail: params.rehydrateSession.participantEmail,
+      projectContext: params.rehydrateSession.projectContext ?? null,
+      proposal: params.rehydrateSession.proposal,
+      recordId: params.recordId,
+      roleLabel: params.rehydrateSession.roleLabel ?? null,
+      start: params.rehydrateSession.start,
+      suggestion: params.rehydrateSession.suggestion
+    });
+    activeSessionId = rehydratedSession.sessionId;
+    session = getAssistantSession(activeSessionId, params.recordId);
+  }
+
+  if (!session) {
+    await params.emit({
+      code: "SESSION_EXPIRED",
+      message: "La sesión del agente expiró. Vuelve a preparar el chat.",
+      type: "error"
+    });
+
+    return null;
+  }
+
+  const focusArea = detectAssistantFocus(prompt);
+  await params.emit({ label: "Preparando contexto de la sesión", type: "status" });
+  await params.emit({
+    label: "Buscando evidencia relevante",
+    tool: "searchMeetingEvidence",
+    type: "tool_start"
+  });
+  const evidence = searchAssistantMeetingEvidence(session.meetings, focusArea, prompt);
+  await params.emit({
+    result: {
+      count: evidence.length,
+      evidence
+    },
+    tool: "searchMeetingEvidence",
+    type: "tool_done"
+  });
+  const contextReadyAt = Date.now();
+  await params.emit({ label: "Esperando respuesta del modelo", type: "status" });
+
+  const assistantInput: TrustworthinessAssistantConversationInput = {
+    evaluatedName: session.context.evaluatedName,
+    history: session.history,
+    meetings: session.meetings,
+    projectContext: session.context.projectContext ?? null,
+    prompt,
+    proposal: session.proposal,
+    roleLabel: session.context.roleLabel ?? null,
+    suggestion: session.suggestion
+  };
+  const structuredReplyPromise = createTrustworthinessAssistantReply(assistantInput);
+  const visibleMessagePromise = streamTrustworthinessAssistantVisibleMessage({
+    emitDelta: async (delta) => {
+      await params.emit({
+        delta,
+        type: "assistant_text_delta"
+      });
+    },
+    input: assistantInput
+  });
+  const [structuredReplyResult, visibleMessageResult] = await Promise.allSettled([
+    structuredReplyPromise,
+    visibleMessagePromise
+  ]);
+  const modelReadyAt = Date.now();
+
+  if (visibleMessageResult.status === "rejected") {
+    throw visibleMessageResult.reason;
+  }
+
+  if (structuredReplyResult.status === "rejected") {
+    throw structuredReplyResult.reason;
+  }
+
+  const assistantReply = structuredReplyResult.value;
+
+  if (assistantReply.decisionTrace.length > 0) {
+    for (const trace of assistantReply.decisionTrace) {
+      await params.emit({
+        delta: trace,
+        type: "decision_trace_delta"
+      });
+    }
+  }
+
+  if (assistantReply.proposalChanged) {
+    await params.emit({
+      label: "Actualizando propuesta local",
+      tool: "updateProposal",
+      type: "tool_start"
+    });
+    session.proposal = assistantReply.proposal;
+    await params.emit({
+      result: {
+        proposalChanged: true
+      },
+      tool: "updateProposal",
+      type: "tool_done"
+    });
+  }
+
+  if (assistantReply.nextIntent === "save") {
+    await params.emit({
+      label: "Preparando confirmación de guardado",
+      tool: "prepareSave",
+      type: "tool_start"
+    });
+    await params.emit({
+      result: {
+        readyToSave: true
+      },
+      tool: "prepareSave",
+      type: "tool_done"
+    });
+  }
+
+  session.history = [
+    ...session.history,
+    { content: prompt, role: "user" as const },
+    { content: assistantReply.message, role: "assistant" as const }
+  ].slice(-ASSISTANT_HISTORY_LIMIT);
+
+  await params.emit({
+    ...assistantReply,
+    sessionId: activeSessionId,
+    type: "assistant_structured_final"
+  });
+  console.info("[tw-assistant-stream]", {
+    contextMs: contextReadyAt - startedAt,
+    modelMs: modelReadyAt - contextReadyAt,
+    totalMs: Date.now() - startedAt
+  });
+
+  return assistantReply;
 }

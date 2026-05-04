@@ -192,7 +192,7 @@ export const TW_GENERATION_STEPS: Array<{
   { id: "validating_evaluation_data", label: "Validando datos de la evaluación" },
   { id: "fetching_airtable_meetings", label: "Consultando reuniones en Airtable" },
   { id: "building_meeting_evidence", label: "Preparando evidencia de reuniones" },
-  { id: "sending_context_to_ai", label: "Enviando contexto a IA" },
+  { id: "sending_context_to_ai", label: "Analizando evidencia con IA" },
   { id: "validating_structured_response", label: "Validando respuesta estructurada" },
   { id: "calculating_tw_score", label: "Calculando score final de TW" }
 ];
@@ -1322,7 +1322,9 @@ export function buildDetailGroups(record: TrustworthinessRecord, options: Detail
         name: "Feedback",
         walkthroughId: "detail-feedback",
         value: options.editable ? (
-          <div className="trustworthiness-feedback-card">
+          <div
+            className={`trustworthiness-feedback-card ${options.feedbackRequiredError ? "has-required-error" : ""}`}
+          >
             <div className="trustworthiness-feedback-toolbar">
               <button
                 className="detail-card-action detail-card-action-secondary"
@@ -1336,7 +1338,13 @@ export function buildDetailGroups(record: TrustworthinessRecord, options: Detail
                 <span className="detail-card-error">{options.feedbackGenerationError}</span>
               ) : null}
             </div>
+            {options.feedbackRequiredError ? (
+              <span className="detail-card-error detail-card-required-error">
+                {options.feedbackRequiredError}
+              </span>
+            ) : null}
             <textarea
+              aria-invalid={options.feedbackRequiredError ? "true" : undefined}
               className="trustworthiness-feedback-editor"
               onChange={(event) => options.onFeedbackChange(event.target.value)}
               rows={9}
@@ -1823,6 +1831,7 @@ export function LoadingProgress({ label }: { label: string }) {
 
 export function createIdleTwGenerationProgress(): TwGenerationProgress {
   return {
+    decisionTrace: [],
     completedStages: [],
     currentStage: null,
     errorMessage: null,
@@ -1833,6 +1842,7 @@ export function createIdleTwGenerationProgress(): TwGenerationProgress {
 
 export function createRunningTwGenerationProgress(): TwGenerationProgress {
   return {
+    decisionTrace: [],
     completedStages: [],
     currentStage: "validating_evaluation_data",
     errorMessage: null,
@@ -1858,6 +1868,10 @@ function isTwGenerationStage(value: unknown): value is TwGenerationStage {
 export function isTwSuggestionStreamEvent(value: unknown): value is TwSuggestionStreamEvent {
   if (!isRecordLike(value) || typeof value.type !== "string") {
     return false;
+  }
+
+  if (value.type === "decision_trace_delta") {
+    return typeof value.delta === "string";
   }
 
   if (value.type === "stage") {

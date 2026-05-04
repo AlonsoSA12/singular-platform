@@ -1,4 +1,4 @@
-import { createTrustworthinessSuggestion } from "../../../../src/airtable.js";
+import { streamTrustworthinessSuggestion } from "../../../../src/airtable.js";
 import {
   getNormalizedEmailParam,
   getPathSegmentFromEnd,
@@ -14,6 +14,7 @@ export async function POST(request: Request) {
   const activeEmail = getNormalizedEmailParam(searchParams, "activeEmail");
   const body = (await request.json()) as SuggestionBody;
   const participantEmail = body.participantEmail?.trim().toLowerCase();
+  const existingFeedback = body.existingFeedback?.trim() ?? "";
   const start = body.start?.trim();
   const end = body.end?.trim();
   let currentStage: TrustworthinessSuggestionStage | null = "validating_evaluation_data";
@@ -49,13 +50,20 @@ export async function POST(request: Request) {
         }
 
         const recordId = getPathSegmentFromEnd(request, 2);
-        const suggestion = await createTrustworthinessSuggestion(
-          recordId,
+        const suggestion = await streamTrustworthinessSuggestion({
+          activeSessionEmail: activeEmail,
+          emitDecisionTrace: (delta) => {
+            writeEvent({
+              delta,
+              type: "decision_trace_delta"
+            });
+          },
+          emitStage: writeStage,
+          explicitRange: { end, start },
+          existingFeedback,
           participantEmail,
-          activeEmail,
-          { end, start },
-          writeStage
-        );
+          recordId
+        });
 
         writeEvent({
           data: {

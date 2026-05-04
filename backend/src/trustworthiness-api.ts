@@ -15,6 +15,7 @@ export type UpdateTrustworthinessBody = {
 
 export type SuggestionBody = {
   end?: string;
+  existingFeedback?: string | null;
   participantEmail?: string;
   start?: string;
 };
@@ -38,10 +39,29 @@ export type AssistantSessionBody = {
   end?: string;
   evaluatedName?: string;
   existingFeedback?: string | null;
+  meetings?: Array<{
+    actionItems?: string[];
+    coachingAnalysis?: string | null;
+    coachingSummary?: string | null;
+    meetingDatetime?: string | null;
+    meetingId?: string;
+    metricsScores?: Record<string, number | null>;
+    title?: string;
+    topics?: string[];
+    transcriptSummary?: string | null;
+  }>;
   participantEmail?: string;
+  proposal?: {
+    credibilityPoints?: number;
+    feedback?: string;
+    groupThinkingPoints?: number;
+    intimacyPoints?: number;
+    reliabilityPoints?: number;
+  };
   projectContext?: string | null;
   roleLabel?: string | null;
   start?: string;
+  suggestion?: Record<string, unknown>;
 };
 
 export type AssistantMessageBody = {
@@ -72,6 +92,44 @@ export type AssistantMessageBody = {
   };
   roleLabel?: string | null;
   suggestion?: Record<string, unknown>;
+};
+
+export type AssistantStreamMessageBody = {
+  prompt?: string;
+  rehydrate?: {
+    activeSessionEmail?: string;
+    end?: string;
+    evaluatedName?: string;
+    evaluatorEmail?: string;
+    history?: Array<{
+      content?: string;
+      role?: "assistant" | "user";
+    }>;
+    meetings?: Array<{
+      actionItems?: string[];
+      coachingAnalysis?: string | null;
+      coachingSummary?: string | null;
+      meetingDatetime?: string | null;
+      meetingId?: string;
+      metricsScores?: Record<string, number | null>;
+      title?: string;
+      topics?: string[];
+      transcriptSummary?: string | null;
+    }>;
+    participantEmail?: string;
+    projectContext?: string | null;
+    proposal?: {
+      credibilityPoints?: number;
+      feedback?: string;
+      groupThinkingPoints?: number;
+      intimacyPoints?: number;
+      reliabilityPoints?: number;
+    };
+    roleLabel?: string | null;
+    start?: string;
+    suggestion?: Record<string, unknown>;
+  };
+  sessionId?: string;
 };
 
 export type AssistantSaveBody = {

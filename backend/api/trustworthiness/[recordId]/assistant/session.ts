@@ -41,11 +41,42 @@ export async function POST(request: Request) {
       evaluatedName,
       evaluatorEmail,
       existingFeedback: body.existingFeedback ?? null,
+      meetings: Array.isArray(body.meetings)
+        ? body.meetings.map((meeting) => ({
+            actionItems: Array.isArray(meeting.actionItems) ? meeting.actionItems : [],
+            coachingAnalysis:
+              typeof meeting.coachingAnalysis === "string" ? meeting.coachingAnalysis : null,
+            coachingSummary:
+              typeof meeting.coachingSummary === "string" ? meeting.coachingSummary : null,
+            meetingDatetime:
+              typeof meeting.meetingDatetime === "string" ? meeting.meetingDatetime : null,
+            meetingId:
+              typeof meeting.meetingId === "string" ? meeting.meetingId : "unknown-meeting",
+            metricsScores:
+              meeting.metricsScores && typeof meeting.metricsScores === "object"
+                ? meeting.metricsScores
+                : {},
+            title: typeof meeting.title === "string" ? meeting.title : "Reunión sin título",
+            topics: Array.isArray(meeting.topics) ? meeting.topics : [],
+            transcriptSummary:
+              typeof meeting.transcriptSummary === "string" ? meeting.transcriptSummary : null
+          }))
+        : undefined,
       participantEmail,
+      proposal: body.proposal
+        ? {
+            credibilityPoints: body.proposal.credibilityPoints ?? 0,
+            feedback: body.proposal.feedback ?? "",
+            groupThinkingPoints: body.proposal.groupThinkingPoints ?? 0,
+            intimacyPoints: body.proposal.intimacyPoints ?? 0,
+            reliabilityPoints: body.proposal.reliabilityPoints ?? 0
+          }
+        : undefined,
       projectContext: body.projectContext ?? null,
       recordId,
       roleLabel: body.roleLabel ?? null,
-      start
+      start,
+      suggestion: body.suggestion
     });
 
     return Response.json({

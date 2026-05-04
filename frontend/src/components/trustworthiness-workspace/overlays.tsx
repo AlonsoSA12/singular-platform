@@ -641,12 +641,15 @@ type TrustworthinessFloatingToastsProps = {
 };
 
 export function TrustworthinessFloatingToasts(props: TrustworthinessFloatingToastsProps) {
-  const [isGenerationToastExpanded, setIsGenerationToastExpanded] = useState(false);
+  const [isGenerationToastExpanded, setIsGenerationToastExpanded] = useState(true);
   const activeGenerationToastId =
     props.generationToasts.find((toast) => toast.tone === "progress")?.id ?? null;
+  const isAiThinkingStage =
+    props.twGenerationProgress.status === "running" &&
+    props.twGenerationProgress.currentStage === "sending_context_to_ai";
 
   useEffect(() => {
-    setIsGenerationToastExpanded(false);
+    setIsGenerationToastExpanded(true);
   }, [activeGenerationToastId]);
 
   const items = [
@@ -676,6 +679,7 @@ export function TrustworthinessFloatingToasts(props: TrustworthinessFloatingToas
         const showExpandedSteps =
           isExpandableProgressToast && isGenerationToastExpanded;
         const completedStagesCount = props.twGenerationProgress.completedStages.length;
+        const currentDecisionTrace = props.twGenerationProgress.decisionTrace;
 
         return (
           <div
@@ -727,7 +731,9 @@ export function TrustworthinessFloatingToasts(props: TrustworthinessFloatingToas
                     const statusLabel = isError
                       ? "Error"
                       : isCurrent
-                        ? "En progreso"
+                        ? step.id === "sending_context_to_ai"
+                          ? "IA pensando"
+                          : "En progreso"
                         : isComplete
                           ? "Listo"
                           : "Pendiente";
@@ -750,6 +756,11 @@ export function TrustworthinessFloatingToasts(props: TrustworthinessFloatingToas
                         <div className="tw-generation-toast-step-copy">
                           <strong>{step.label}</strong>
                           <small>{statusLabel}</small>
+                          {isCurrent &&
+                          step.id === "sending_context_to_ai" &&
+                          currentDecisionTrace.length > 0 ? (
+                            <p>{currentDecisionTrace[currentDecisionTrace.length - 1]}</p>
+                          ) : null}
                         </div>
                       </div>
                     );

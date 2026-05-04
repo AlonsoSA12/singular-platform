@@ -1,19 +1,34 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import {
+  analyzeAgileObjectiveHealth,
+  analyzeAgilePortfolio,
+  analyzeAgileKeyResultSentiments,
+  createAgileKeyProject,
+  createAgileKeyResult,
+  createAgileObjective,
+  generateAgileKeyResultDraft,
+  generateAgileObjectiveDraft,
   createTrustworthinessAssistantReply,
   createTrustworthinessAssistantSession,
+  streamTrustworthinessAssistantMessage,
   createTrustworthinessFeedback,
   createTrustworthinessSuggestion,
+  streamTrustworthinessSuggestion,
   findUserByEmail,
   getCoachingInputLogTranscript,
+  listAgileKeyProjectsForProject,
+  listAgileKeyResultHistoryBulk,
+  listAgileObjectivesForProject,
+  listAgileProjectsForCollaborator,
   listCoachingInputLogs,
   listTrustworthinessRecords,
   saveTrustworthinessAssistantProposal,
   TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS,
   updateTrustworthinessRecord
 } from "../src/airtable.js";
-import { appConfig } from "../src/config.js";
+import { appConfig, getAssistantRuntimeConfig } from "../src/config.js";
+import type { AssistantStreamMessageBody } from "../src/trustworthiness-api.js";
 
 type ValidateEmailBody = {
   email?: string;
@@ -22,6 +37,105 @@ type ValidateEmailBody = {
 type TrustworthinessQuery = {
   evaluatorEmail?: string;
   period?: string | string[];
+};
+
+type AgileProjectsQuery = {
+  collaboratorEmail?: string;
+};
+
+type AgileObjectivesQuery = {
+  projectId?: string;
+};
+
+type AgileKeyProjectsQuery = {
+  projectId?: string;
+};
+
+type AgileKeyResultHistoryBulkBody = {
+  keyResultIds?: string[];
+};
+
+type AgileKeyResultSentimentsBody = {
+  keyResults?: Array<{
+    code?: string;
+    currentValue?: number | null;
+    id?: string;
+    initialValue?: number | null;
+    metric?: string;
+    progress?: number | null;
+    status?: string;
+    targetDate?: string;
+    targetValue?: number | null;
+    title?: string;
+  }>;
+};
+
+type AgileObjectiveHealthBody = {
+  keyProjects?: unknown[];
+  objectives?: unknown[];
+  project?: {
+    id?: string;
+    name?: string;
+  };
+};
+
+type AgilePortfolioAnalysisBody = {
+  generatedFor?: string;
+  portfolioScore?: number | null;
+  projects?: unknown[];
+};
+
+type AgileObjectiveDraftBody = {
+  existingObjectives?: unknown[];
+  idea?: string;
+  keyProjects?: unknown[];
+  projectId?: string;
+  projectName?: string;
+};
+
+type AgileKeyResultDraftBody = {
+  existingKeyResults?: unknown[];
+  objective?: unknown;
+  projectId?: string;
+  projectName?: string;
+};
+
+type CreateAgileObjectiveBody = {
+  aiSuggestedKeyResults?: string;
+  description?: string;
+  explanation?: string;
+  metric?: string;
+  objective?: string;
+  priority?: string;
+  projectId?: string;
+  quarter?: string;
+  status?: "Achieved" | "In Progress" | "Pending Review" | "Underachieved";
+  targetDate?: string;
+  type?: string;
+};
+
+type CreateAgileKeyResultBody = {
+  currentValue?: number | null;
+  explanation?: string;
+  initialValue?: number | null;
+  keyResult?: string;
+  metric?: string;
+  objectiveId?: string;
+  projectId?: string;
+  quarter?: string;
+  status?: "Done" | "In progress" | "Todo";
+  targetDate?: string;
+  targetValue?: number | null;
+};
+
+type CreateAgileKeyProjectBody = {
+  dontShowInSingularStories?: boolean;
+  epicStory?: string;
+  justification?: string;
+  name?: string;
+  projectId?: string;
+  status?: "Active" | "Archived" | "Suggested by Resource";
+  totalStories?: number | null;
 };
 
 type CoachingInputLogQuery = {
@@ -59,6 +173,7 @@ type TrustworthinessSuggestionParams = {
 
 type TrustworthinessSuggestionBody = {
   end?: string;
+  existingFeedback?: string | null;
   participantEmail?: string;
   start?: string;
 };
@@ -82,10 +197,13 @@ type AssistantSessionBody = {
   end?: string;
   evaluatedName?: string;
   existingFeedback?: string | null;
+  meetings?: AssistantMessageBody["meetings"];
   participantEmail?: string;
+  proposal?: AssistantMessageBody["proposal"];
   projectContext?: string | null;
   roleLabel?: string | null;
   start?: string;
+  suggestion?: Record<string, unknown>;
 };
 
 type AssistantMessageBody = {
@@ -142,6 +260,10 @@ type AssistantSaveBody = {
 
 type TrustworthinessSuggestionStreamEvent =
   | {
+      delta: string;
+      type: "decision_trace_delta";
+    }
+  | {
       label: string;
       stage: keyof typeof TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS;
       type: "stage";
@@ -170,6 +292,13 @@ export function buildServer() {
     return {
       ok: true,
       service: "singular-platform-api"
+    };
+  });
+
+  app.get("/trustworthiness/assistant/config", async () => {
+    return {
+      ok: true,
+      config: getAssistantRuntimeConfig()
     };
   });
 
@@ -217,6 +346,234 @@ export function buildServer() {
     const payload = await listTrustworthinessRecords(selectedPeriods, evaluatorEmail);
 
     return reply.send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.get<{ Querystring: AgileProjectsQuery }>("/okrs/projects", async (request, reply) => {
+    const collaboratorEmail = request.query.collaboratorEmail?.trim().toLowerCase();
+
+    if (!collaboratorEmail) {
+      return reply.code(400).send({
+        ok: false,
+        message: "El email del collaborator es obligatorio."
+      });
+    }
+
+    const payload = await listAgileProjectsForCollaborator(collaboratorEmail);
+
+    return reply.send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.get<{ Querystring: AgileObjectivesQuery }>("/okrs/objectives", async (request, reply) => {
+    const projectId = request.query.projectId?.trim();
+
+    if (!projectId) {
+      return reply.code(400).send({
+        ok: false,
+        message: "El projectId es obligatorio."
+      });
+    }
+
+    const payload = await listAgileObjectivesForProject(projectId);
+
+    return reply.send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.post<{ Body: CreateAgileObjectiveBody }>("/okrs/objectives", async (request, reply) => {
+    const payload = await createAgileObjective({
+      aiSuggestedKeyResults: request.body.aiSuggestedKeyResults,
+      description: request.body.description,
+      explanation: request.body.explanation,
+      metric: request.body.metric,
+      objective: request.body.objective ?? "",
+      priority: request.body.priority,
+      projectId: request.body.projectId ?? "",
+      quarter: request.body.quarter,
+      status: request.body.status,
+      targetDate: request.body.targetDate,
+      type: request.body.type
+    });
+
+    return reply.code(201).send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.post<{ Body: CreateAgileKeyResultBody }>("/okrs/key-results", async (request, reply) => {
+    const payload = await createAgileKeyResult({
+      currentValue: request.body.currentValue,
+      explanation: request.body.explanation,
+      initialValue: request.body.initialValue,
+      keyResult: request.body.keyResult ?? "",
+      metric: request.body.metric,
+      objectiveId: request.body.objectiveId ?? "",
+      projectId: request.body.projectId ?? "",
+      quarter: request.body.quarter,
+      status: request.body.status,
+      targetDate: request.body.targetDate,
+      targetValue: request.body.targetValue
+    });
+
+    return reply.code(201).send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.post<{ Body: AgileKeyResultHistoryBulkBody }>("/okrs/key-result-history/bulk", async (request, reply) => {
+    const keyResultIds = Array.isArray(request.body.keyResultIds) ? request.body.keyResultIds : [];
+
+    if (keyResultIds.length === 0) {
+      return reply.code(400).send({
+        ok: false,
+        message: "La lista de Key Results es obligatoria."
+      });
+    }
+
+    const payload = await listAgileKeyResultHistoryBulk(keyResultIds);
+
+    return reply.send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.post<{ Body: AgileKeyResultSentimentsBody }>("/okrs/key-result-sentiments", async (request, reply) => {
+    const keyResults = Array.isArray(request.body.keyResults) ? request.body.keyResults : [];
+
+    if (keyResults.length === 0) {
+      return reply.code(400).send({
+        ok: false,
+        message: "La lista de Key Results es obligatoria."
+      });
+    }
+
+    const payload = await analyzeAgileKeyResultSentiments(
+      keyResults
+        .filter((keyResult) => keyResult.id)
+        .map((keyResult) => ({
+          code: keyResult.code,
+          currentValue: keyResult.currentValue,
+          id: keyResult.id ?? "",
+          initialValue: keyResult.initialValue,
+          metric: keyResult.metric,
+          progress: keyResult.progress,
+          status: keyResult.status,
+          targetDate: keyResult.targetDate,
+          targetValue: keyResult.targetValue,
+          title: keyResult.title ?? keyResult.id ?? "Key Result"
+        }))
+    );
+
+    return reply.send(payload);
+  });
+
+  app.post<{ Body: AgileObjectiveHealthBody }>("/okrs/objective-health-analysis", async (request, reply) => {
+    const objectives = Array.isArray(request.body.objectives) ? request.body.objectives : [];
+
+    if (objectives.length === 0) {
+      return reply.code(400).send({
+        ok: false,
+        message: "La lista de Objectives es obligatoria."
+      });
+    }
+
+    const payload = await analyzeAgileObjectiveHealth({
+      keyProjects: Array.isArray(request.body.keyProjects) ? request.body.keyProjects : [],
+      objectives: objectives as Parameters<typeof analyzeAgileObjectiveHealth>[0]["objectives"],
+      project:
+        request.body.project && typeof request.body.project === "object"
+          ? {
+              id: request.body.project.id ?? "",
+              name: request.body.project.name ?? ""
+            }
+          : undefined
+    });
+
+    return reply.send(payload);
+  });
+
+  app.post<{ Body: AgilePortfolioAnalysisBody }>("/okrs/portfolio-analysis", async (request, reply) => {
+    const projects = Array.isArray(request.body.projects) ? request.body.projects : [];
+
+    if (projects.length === 0) {
+      return reply.code(400).send({
+        ok: false,
+        message: "La lista de Projects es obligatoria."
+      });
+    }
+
+    const payload = await analyzeAgilePortfolio({
+      generatedFor: request.body.generatedFor ?? "",
+      portfolioScore: typeof request.body.portfolioScore === "number" ? request.body.portfolioScore : null,
+      projects: projects as Parameters<typeof analyzeAgilePortfolio>[0]["projects"]
+    });
+
+    return reply.send(payload);
+  });
+
+  app.post<{ Body: AgileObjectiveDraftBody }>("/okrs/ai/objective-draft", async (request, reply) => {
+    const payload = await generateAgileObjectiveDraft({
+      existingObjectives: Array.isArray(request.body.existingObjectives) ? request.body.existingObjectives : [],
+      idea: request.body.idea ?? "",
+      keyProjects: Array.isArray(request.body.keyProjects) ? request.body.keyProjects : [],
+      projectId: request.body.projectId ?? "",
+      projectName: request.body.projectName ?? ""
+    });
+
+    return reply.send(payload);
+  });
+
+  app.post<{ Body: AgileKeyResultDraftBody }>("/okrs/ai/key-result-draft", async (request, reply) => {
+    const payload = await generateAgileKeyResultDraft({
+      existingKeyResults: Array.isArray(request.body.existingKeyResults) ? request.body.existingKeyResults : [],
+      objective: request.body.objective ?? null,
+      projectId: request.body.projectId ?? "",
+      projectName: request.body.projectName ?? ""
+    });
+
+    return reply.send(payload);
+  });
+
+  app.get<{ Querystring: AgileKeyProjectsQuery }>("/okrs/key-projects", async (request, reply) => {
+    const projectId = request.query.projectId?.trim();
+
+    if (!projectId) {
+      return reply.code(400).send({
+        ok: false,
+        message: "El projectId es obligatorio."
+      });
+    }
+
+    const payload = await listAgileKeyProjectsForProject(projectId);
+
+    return reply.send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.post<{ Body: CreateAgileKeyProjectBody }>("/okrs/key-projects", async (request, reply) => {
+    const payload = await createAgileKeyProject({
+      dontShowInSingularStories: request.body.dontShowInSingularStories,
+      epicStory: request.body.epicStory,
+      justification: request.body.justification,
+      name: request.body.name ?? "",
+      projectId: request.body.projectId ?? "",
+      status: request.body.status,
+      totalStories: request.body.totalStories
+    });
+
+    return reply.code(201).send({
       ok: true,
       ...payload
     });
@@ -301,6 +658,7 @@ export function buildServer() {
     const activeEmail = request.query.activeEmail?.trim().toLowerCase();
     const evaluatorEmail = request.query.evaluatorEmail?.trim().toLowerCase();
     const participantEmail = request.body.participantEmail?.trim().toLowerCase();
+    const existingFeedback = request.body.existingFeedback?.trim() ?? "";
     const start = request.body.start?.trim();
     const end = request.body.end?.trim();
 
@@ -329,7 +687,9 @@ export function buildServer() {
       request.params.recordId,
       participantEmail,
       activeEmail,
-      { start, end }
+      { start, end },
+      undefined,
+      existingFeedback
     );
 
     return reply.send({
@@ -376,6 +736,7 @@ export function buildServer() {
       const activeEmail = request.query.activeEmail?.trim().toLowerCase();
       const evaluatorEmail = request.query.evaluatorEmail?.trim().toLowerCase();
       const participantEmail = request.body.participantEmail?.trim().toLowerCase();
+      const existingFeedback = request.body.existingFeedback?.trim() ?? "";
       const start = request.body.start?.trim();
       const end = request.body.end?.trim();
 
@@ -393,13 +754,20 @@ export function buildServer() {
         throw new Error("El rango total start/end es obligatorio.");
       }
 
-      const suggestion = await createTrustworthinessSuggestion(
-        request.params.recordId,
+      const suggestion = await streamTrustworthinessSuggestion({
+        activeSessionEmail: activeEmail,
+        emitDecisionTrace: (delta) => {
+          writeEvent({
+            delta,
+            type: "decision_trace_delta"
+          });
+        },
+        emitStage: writeStage,
+        explicitRange: { start, end },
+        existingFeedback,
         participantEmail,
-        activeEmail,
-        { start, end },
-        writeStage
-      );
+        recordId: request.params.recordId
+      });
 
       writeEvent({
         data: {
@@ -469,17 +837,174 @@ export function buildServer() {
       evaluatedName,
       evaluatorEmail,
       existingFeedback: request.body.existingFeedback ?? null,
+      meetings: Array.isArray(request.body.meetings)
+        ? request.body.meetings.map((meeting) => ({
+            actionItems: Array.isArray(meeting.actionItems) ? meeting.actionItems : [],
+            coachingAnalysis:
+              typeof meeting.coachingAnalysis === "string" ? meeting.coachingAnalysis : null,
+            coachingSummary:
+              typeof meeting.coachingSummary === "string" ? meeting.coachingSummary : null,
+            meetingDatetime:
+              typeof meeting.meetingDatetime === "string" ? meeting.meetingDatetime : null,
+            meetingId:
+              typeof meeting.meetingId === "string" ? meeting.meetingId : "unknown-meeting",
+            metricsScores:
+              meeting.metricsScores && typeof meeting.metricsScores === "object"
+                ? meeting.metricsScores
+                : {},
+            title: typeof meeting.title === "string" ? meeting.title : "Reunión sin título",
+            topics: Array.isArray(meeting.topics) ? meeting.topics : [],
+            transcriptSummary:
+              typeof meeting.transcriptSummary === "string" ? meeting.transcriptSummary : null
+          }))
+        : undefined,
       participantEmail,
+      proposal: request.body.proposal
+        ? {
+            credibilityPoints: request.body.proposal.credibilityPoints ?? 0,
+            feedback: request.body.proposal.feedback ?? "",
+            groupThinkingPoints: request.body.proposal.groupThinkingPoints ?? 0,
+            intimacyPoints: request.body.proposal.intimacyPoints ?? 0,
+            reliabilityPoints: request.body.proposal.reliabilityPoints ?? 0
+          }
+        : undefined,
       projectContext: request.body.projectContext ?? null,
       recordId: request.params.recordId,
       roleLabel: request.body.roleLabel ?? null,
-      start
+      start,
+      suggestion: request.body.suggestion
     });
 
     return reply.send({
       ok: true,
       ...session
     });
+  });
+
+  app.post<{
+    Body: AssistantStreamMessageBody;
+    Params: TrustworthinessSuggestionParams;
+  }>("/trustworthiness/:recordId/assistant/message/stream", async (request, reply) => {
+    const prompt = request.body.prompt?.trim();
+    const sessionId = request.body.sessionId?.trim();
+    const rehydrate =
+      request.body.rehydrate &&
+      typeof request.body.rehydrate === "object" &&
+      typeof request.body.rehydrate.evaluatedName === "string" &&
+      typeof request.body.rehydrate.evaluatorEmail === "string" &&
+      typeof request.body.rehydrate.participantEmail === "string" &&
+      typeof request.body.rehydrate.start === "string" &&
+      typeof request.body.rehydrate.end === "string" &&
+      request.body.rehydrate.proposal &&
+      request.body.rehydrate.suggestion
+        ? {
+            activeSessionEmail:
+              typeof request.body.rehydrate.activeSessionEmail === "string"
+                ? request.body.rehydrate.activeSessionEmail
+                : undefined,
+            end: request.body.rehydrate.end.trim(),
+            evaluatedName: request.body.rehydrate.evaluatedName.trim(),
+            evaluatorEmail: request.body.rehydrate.evaluatorEmail.trim().toLowerCase(),
+            history: Array.isArray(request.body.rehydrate.history)
+              ? request.body.rehydrate.history
+                  .filter(
+                    (message): message is { content: string; role: "assistant" | "user" } =>
+                      (message.role === "assistant" || message.role === "user") &&
+                      typeof message.content === "string" &&
+                      message.content.trim().length > 0
+                  )
+                  .map((message) => ({
+                    content: message.content.trim(),
+                    role: message.role
+                  }))
+              : [],
+            meetings: Array.isArray(request.body.rehydrate.meetings)
+              ? request.body.rehydrate.meetings.map((meeting) => ({
+                  actionItems: Array.isArray(meeting.actionItems) ? meeting.actionItems : [],
+                  coachingAnalysis:
+                    typeof meeting.coachingAnalysis === "string" ? meeting.coachingAnalysis : null,
+                  coachingSummary:
+                    typeof meeting.coachingSummary === "string" ? meeting.coachingSummary : null,
+                  meetingDatetime:
+                    typeof meeting.meetingDatetime === "string" ? meeting.meetingDatetime : null,
+                  meetingId:
+                    typeof meeting.meetingId === "string" ? meeting.meetingId : "unknown-meeting",
+                  metricsScores:
+                    meeting.metricsScores && typeof meeting.metricsScores === "object"
+                      ? meeting.metricsScores
+                      : {},
+                  title: typeof meeting.title === "string" ? meeting.title : "Reunión sin título",
+                  topics: Array.isArray(meeting.topics) ? meeting.topics : [],
+                  transcriptSummary:
+                    typeof meeting.transcriptSummary === "string"
+                      ? meeting.transcriptSummary
+                      : null
+                }))
+              : undefined,
+            participantEmail: request.body.rehydrate.participantEmail.trim().toLowerCase(),
+            projectContext:
+              typeof request.body.rehydrate.projectContext === "string"
+                ? request.body.rehydrate.projectContext
+                : null,
+            proposal: {
+              credibilityPoints: request.body.rehydrate.proposal.credibilityPoints ?? 0,
+              feedback: request.body.rehydrate.proposal.feedback ?? "",
+              groupThinkingPoints: request.body.rehydrate.proposal.groupThinkingPoints ?? 0,
+              intimacyPoints: request.body.rehydrate.proposal.intimacyPoints ?? 0,
+              reliabilityPoints: request.body.rehydrate.proposal.reliabilityPoints ?? 0
+            },
+            roleLabel:
+              typeof request.body.rehydrate.roleLabel === "string"
+                ? request.body.rehydrate.roleLabel
+                : null,
+            start: request.body.rehydrate.start.trim(),
+            suggestion: request.body.rehydrate.suggestion
+          }
+        : undefined;
+
+    if (!prompt) {
+      return reply.code(400).send({
+        ok: false,
+        message: "El prompt del usuario es obligatorio."
+      });
+    }
+
+    if (!sessionId) {
+      return reply.code(400).send({
+        ok: false,
+        message: "El sessionId del agente es obligatorio."
+      });
+    }
+
+    reply.raw.writeHead(200, {
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "Content-Type": "application/x-ndjson; charset=utf-8"
+    });
+
+    try {
+      await streamTrustworthinessAssistantMessage({
+        emit: (event) => {
+          reply.raw.write(`${JSON.stringify(event)}\n`);
+        },
+        prompt,
+        rehydrateSession: rehydrate,
+        recordId: request.params.recordId,
+        sessionId
+      });
+    } catch (error) {
+      reply.raw.write(
+        `${JSON.stringify({
+          message:
+            error instanceof Error
+              ? error.message
+              : "No fue posible continuar la conversación del agente.",
+          type: "error"
+        })}\n`
+      );
+    } finally {
+      reply.raw.end();
+    }
   });
 
   app.post<{

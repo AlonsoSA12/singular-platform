@@ -24,6 +24,8 @@ SESSION_SECRET=
 FRONTEND_URL=http://localhost:3000
 BACKEND_PORT=4000
 BACKEND_BASE_URL=http://localhost:4000
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_REASONING_EFFORT=low
 ```
 
 ## Desarrollo local

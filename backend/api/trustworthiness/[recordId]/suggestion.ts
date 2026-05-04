@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const activeEmail = getNormalizedEmailParam(searchParams, "activeEmail");
     const body = (await request.json()) as SuggestionBody;
     const participantEmail = body.participantEmail?.trim().toLowerCase();
+    const existingFeedback = body.existingFeedback?.trim() ?? "";
     const start = body.start?.trim();
     const end = body.end?.trim();
 
@@ -34,7 +35,9 @@ export async function POST(request: Request) {
       recordId,
       participantEmail,
       activeEmail,
-      { end, start }
+      { end, start },
+      undefined,
+      existingFeedback
     );
 
     return Response.json({
