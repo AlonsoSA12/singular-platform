@@ -1,4 +1,4 @@
-import { analyzeAgileKeyResultSentiments } from "../../src/airtable.js";
+import { analyzeAgileKeyResultSentiments } from "../../src/okrs/ai-key-result-sentiment.js";
 
 type KeyResultSentimentsBody = {
   keyResults?: Array<{

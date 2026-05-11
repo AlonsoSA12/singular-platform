@@ -1,4 +1,4 @@
-import { streamTrustworthinessAssistantMessage } from "../../../../../src/airtable.js";
+import { streamTrustworthinessAssistantMessage } from "../../../../../src/trustworthiness/assistant-reply.js";
 import {
   badRequestResponse,
   trustworthinessErrorResponse,

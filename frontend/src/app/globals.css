@@ -1,3 +1,5 @@
+@import "../components/okr-bot/okr-bot.css";
+
 :root {
   color-scheme: light;
   --bg: #e4e7ef;
@@ -707,8 +709,8 @@ button {
 
 .workspace-rail-link-label,
 .workspace-rail-footer-link span {
-  font-size: 9px;
-  font-weight: 500;
+  font-size: 10.5px;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1.1;
   text-align: center;
@@ -7240,6 +7242,7 @@ button.client-okrs-project-sentiment:focus-visible {
   cursor: not-allowed;
 }
 
+
 .client-okrs-project-error {
   margin: 0;
   color: var(--client-okrs-red);
@@ -7577,6 +7580,7 @@ button.client-okrs-project-sentiment:focus-visible {
   padding: 0.8rem 0.9rem;
   border-radius: 999px;
   color: inherit;
+  text-decoration: none;
   text-align: left;
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
@@ -8233,6 +8237,111 @@ button.client-okrs-project-sentiment:focus-visible {
   color: var(--client-okrs-amber);
   font-size: var(--type-body-small);
   line-height: 1.35;
+}
+
+.client-okrs-kr-ai-readout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.6fr) minmax(20rem, 1.4fr);
+  grid-template-areas:
+    "label reason"
+    "label action";
+  align-items: end;
+  gap: 0.14rem 1rem;
+  margin: -0.25rem 1rem 0.9rem;
+  padding: 0.54rem 0.72rem;
+  border: 1px solid rgba(111, 143, 255, 0.14);
+  border-left: 2px solid currentColor;
+  border-radius: 0.65rem;
+  background: rgba(5, 6, 13, 0.12);
+  color: var(--client-okrs-faint);
+}
+
+.client-okrs-kr-ai-readout div {
+  grid-area: label;
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.client-okrs-kr-ai-readout div + p {
+  grid-area: reason;
+  align-self: end;
+  padding-top: 0.28rem;
+}
+
+.client-okrs-kr-ai-readout span {
+  color: currentColor;
+  font-size: 0.78rem;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.client-okrs-kr-ai-readout strong {
+  color: var(--client-okrs-text);
+  font-size: var(--type-body-small);
+  font-weight: 500;
+  line-height: 1.22;
+}
+
+.client-okrs-kr-ai-readout p,
+.client-okrs-kr-ai-readout small {
+  margin: 0;
+  color: var(--client-okrs-muted);
+  font-size: var(--type-body-small);
+  font-weight: 500;
+  line-height: 1.24;
+}
+
+.client-okrs-kr-ai-readout small {
+  color: color-mix(in srgb, currentColor 70%, var(--client-okrs-muted));
+}
+
+.client-okrs-kr-ai-readout div small {
+  font-size: var(--type-body-small);
+  line-height: 1.22;
+}
+
+.client-okrs-kr-ai-readout > small {
+  grid-area: action;
+  grid-column: 2;
+}
+
+.client-okrs-kr-ai-readout.is-hot {
+  background: rgba(45, 212, 167, 0.045);
+  color: var(--client-okrs-green);
+}
+
+.client-okrs-kr-ai-readout.is-cold {
+  background: rgba(244, 185, 66, 0.045);
+  color: var(--client-okrs-amber);
+}
+
+.client-okrs-kr-ai-readout.is-bleeding {
+  background: rgba(248, 113, 113, 0.045);
+  color: var(--client-okrs-red);
+}
+
+.client-okrs-kr-ai-readout.is-new,
+.client-okrs-kr-ai-readout.is-loading,
+.client-okrs-kr-ai-readout.is-empty {
+  background: rgba(196, 206, 217, 0.06);
+  color: var(--client-okrs-faint);
+}
+
+@media (max-width: 980px) {
+  .client-okrs-kr-ai-readout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "label"
+      "reason"
+      "action";
+  }
+
+  .client-okrs-kr-ai-readout > small {
+    grid-column: auto;
+  }
 }
 
 .client-okrs-objective-health {
@@ -9493,8 +9602,42 @@ button.client-okrs-project-sentiment:focus-visible {
   stroke-width: 2;
 }
 
-.client-okrs-kr-metric-grid {
+.client-okrs-kr-detail-content {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.95fr) minmax(22rem, 1.05fr);
+  align-items: stretch;
+  gap: 0.8rem;
   margin: 0 1rem 1rem;
+}
+
+.client-okrs-kr-detail-content .client-okrs-kr-metric-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.client-okrs-kr-inline-history {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid rgba(111, 143, 255, 0.2);
+  border-radius: 0.85rem;
+  background: rgba(5, 6, 13, 0.14);
+}
+
+.client-okrs-kr-inline-history .client-okrs-portfolio-kr-chart {
+  min-height: 4.9rem;
+}
+
+.client-okrs-kr-inline-history .client-okrs-portfolio-kr-chart svg {
+  min-height: 4.25rem;
+}
+
+.client-okrs-kr-inline-history .client-okrs-portfolio-kr-chart-empty {
+  min-height: 4.9rem;
 }
 
 .client-okrs-kr-explanation {
@@ -9516,6 +9659,12 @@ button.client-okrs-project-sentiment:focus-visible {
   color: var(--client-okrs-muted);
   font-weight: 500;
   line-height: 1.45;
+}
+
+@media (max-width: 980px) {
+  .client-okrs-kr-detail-content {
+    grid-template-columns: 1fr;
+  }
 }
 
 .client-okrs-history-panel {
@@ -9582,6 +9731,10 @@ button.client-okrs-project-sentiment:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
+}
+
+.client-okrs-app-confirm-card .client-okrs-app-confirm-actions.has-three-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .client-okrs-app-confirm-card button {
@@ -10254,6 +10407,8 @@ button.client-okrs-project-sentiment:focus-visible {
     grid-template-columns: 1fr;
   }
 
+
+
   .client-okrs-card-top,
   .client-okrs-card-meta {
     align-items: flex-start;
@@ -10344,4 +10499,6 @@ button.client-okrs-project-sentiment:focus-visible {
   .client-okrs-project-sentiment {
     width: 100%;
   }
+
+
 }

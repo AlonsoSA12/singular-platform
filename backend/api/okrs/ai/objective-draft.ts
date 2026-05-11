@@ -1,4 +1,4 @@
-import { generateAgileObjectiveDraft } from "../../../src/airtable.js";
+import { generateAgileObjectiveDraft } from "../../../src/okrs/ai-drafts.js";
 
 export async function POST(request: Request) {
   try {

@@ -42,8 +42,11 @@ export type AgileKeyResult = {
   explanation: string;
   id: string;
   initialValue: number | null;
+  keyProjectIds?: string[];
+  keyProjectLabels?: string[];
   metric: string;
   progress: number;
+  sourceRecordId: string;
   status: string;
   targetDate: string;
   targetValue: number | null;
@@ -120,6 +123,19 @@ export type AgileGeneratedKeyResultDraft = {
   targetValue: number | null;
 };
 
+export type AgileGeneratedKeyProjectDraft = {
+  clarity: number;
+  epicStory: string;
+  finalScore: number;
+  justification: string;
+  keyResultIds: string[];
+  name: string;
+  projectId: string;
+  status: "Suggested by Resource";
+  strategicFocus: number;
+  valueOrientation: number;
+};
+
 export type AgileGeneratedObjectiveDraft = {
   description: string;
   explanation: string;
@@ -144,6 +160,7 @@ export type AgileKeyProject = {
   name: string;
   projectIds: string[];
   qualityScore: number;
+  sourceRecordId: string;
   strategicFocus: number | null;
   status: string;
   story: string;
@@ -181,6 +198,10 @@ export type CreateAgileKeyResultInput = {
   targetValue?: number | null;
 };
 
+export type UpdateAgileKeyResultInput = Partial<CreateAgileKeyResultInput> & {
+  recordId: string;
+};
+
 export type CreateAgileKeyProjectInput = {
   dontShowInSingularStories?: boolean;
   epicStory?: string;
@@ -189,6 +210,115 @@ export type CreateAgileKeyProjectInput = {
   projectId: string;
   status?: "Active" | "Archived" | "Suggested by Resource";
   totalStories?: number | null;
+};
+
+export type SingularAgileKeyProjectInput = {
+  clarity?: number | null;
+  dontShowInSingularStories?: boolean;
+  epicStory?: string;
+  finalScore?: number | null;
+  justification?: string;
+  keyResultIds?: string[];
+  name: string;
+  projectIds?: string[];
+  status?: string;
+  strategicFocus?: number | null;
+  valueOrientation?: number | null;
+};
+
+export type SingularAgileKeyProjectUpdateInput = Partial<SingularAgileKeyProjectInput> & {
+  recordId: string;
+};
+
+export type SingularAgileObjectiveInput = {
+  aiSuggestedKeyResults?: string;
+  description?: string;
+  explanation?: string;
+  keyResultIds?: string[];
+  metric?: string;
+  objective: string;
+  priority?: string;
+  projectIds?: string[];
+  status?: "Achieved" | "In Progress" | "Pending Review" | "Underachieved";
+  targetDate?: string;
+  type?: string;
+};
+
+export type SingularAgileObjectiveUpdateInput = Partial<SingularAgileObjectiveInput> & {
+  recordId: string;
+};
+
+export type SingularAgileKeyResultInput = {
+  currentValue?: number | null;
+  explanation?: string;
+  initialValue?: number | null;
+  keyResult: string;
+  metric?: string;
+  objectiveIds?: string[];
+  projectIds?: string[];
+  status?: "Done" | "In progress" | "Todo";
+  targetDate?: string;
+  targetValue?: number | null;
+};
+
+export type SingularAgileKeyResultUpdateInput = Partial<SingularAgileKeyResultInput> & {
+  recordId: string;
+};
+
+export type OkrBotAction =
+  | "create_key_project"
+  | "create_key_result"
+  | "create_objective"
+  | "edit_key_project"
+  | "edit_key_result"
+  | "edit_objective";
+
+export type OkrBotProposal = {
+  draft: unknown;
+  operation: "create" | "edit";
+  targetType: "key_project" | "key_result" | "objective";
+};
+
+export type OkrBotChatInput = {
+  action?: OkrBotAction;
+  activeProposal?: OkrBotProposal;
+  conversationHistory?: Array<{
+    role: "assistant" | "user";
+    text: string;
+  }>;
+  memoryLimit?: number;
+  message?: string;
+  objectiveId?: string;
+  projectId: string;
+  projectName?: string;
+  targetLabel?: string;
+  targetId?: string;
+};
+
+export type OkrBotChatResponse = {
+  action: OkrBotAction | null;
+  context: {
+    keyProjectCount: number;
+    keyResultCount: number;
+    keyResultHistoryCount: number;
+    objectiveCount: number;
+    project: {
+      id: string;
+      name: string;
+    };
+    warnings: string[];
+  };
+  message: string;
+  nextStep: "choose_action" | "confirm_proposal" | "provide_prompt" | "select_target";
+  ok: true;
+  options?: Array<string | { id: string; label: string; meta?: string; searchText?: string }>;
+  proposal?: OkrBotProposal;
+  prompt?: string;
+  selectedTarget?: {
+    id: string;
+    label: string;
+  };
+  selectedTargetId?: string;
 };
 
 type AgileProjectsSuccess = {
@@ -257,6 +387,12 @@ type AgileKeyResultDraftSuccess = {
   ok: true;
 };
 
+type AgileKeyProjectDraftSuccess = {
+  draft: AgileGeneratedKeyProjectDraft;
+  model: string;
+  ok: true;
+};
+
 type AgileCreateObjectiveSuccess = {
   objective: AgileObjective;
   ok: true;
@@ -277,6 +413,27 @@ type AgileCreateKeyProjectSuccess = {
   projectId: string;
   tableName: string;
 };
+
+type SingularAgileKeyProjectWriteSuccess = {
+  acceptedFields: string[];
+  created?: boolean;
+  invalidFields: Array<{ field: string; message: string }>;
+  missingRequiredFields: string[];
+  ok: true;
+  record: {
+    createdTime: string;
+    fields: Record<string, unknown>;
+    id: string;
+  };
+  status: string;
+  tableName: string;
+  unknownFields: string[];
+  updated?: boolean;
+};
+
+type SingularAgileKeyResultWriteSuccess = SingularAgileKeyProjectWriteSuccess;
+
+type SingularAgileObjectiveWriteSuccess = SingularAgileKeyProjectWriteSuccess;
 
 type AgileProjectsFailure = {
   message?: string;
@@ -573,6 +730,7 @@ export async function generateAgileObjectiveDraft(input: {
 
 export async function generateAgileKeyResultDraftInBackend(input: {
   existingKeyResults: AgileKeyResult[];
+  idea: string;
   objective: AgileObjective;
   projectId: string;
   projectName: string;
@@ -595,6 +753,7 @@ export async function generateAgileKeyResultDraftInBackend(input: {
 
 export async function generateAgileKeyResultDraft(input: {
   existingKeyResults: AgileKeyResult[];
+  idea: string;
   objective: AgileObjective;
   projectId: string;
   projectName: string;
@@ -611,6 +770,55 @@ export async function generateAgileKeyResultDraft(input: {
   return parseOkrsBackendJson<AgileKeyResultDraftSuccess>(
     response,
     "No fue posible generar el Key Result con IA."
+  );
+}
+
+export async function generateAgileKeyProjectDraftInBackend(input: {
+  existingKeyProjects: AgileKeyProject[];
+  existingKeyResults: AgileKeyResult[];
+  idea: string;
+  objectives: AgileObjective[];
+  projectId: string;
+  projectName: string;
+  selectedKeyResult?: AgileKeyResult | null;
+}) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/okrs/ai/key-project-draft`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileKeyProjectDraftSuccess>(
+    response,
+    "No fue posible generar el Key Project con IA."
+  );
+}
+
+export async function generateAgileKeyProjectDraft(input: {
+  existingKeyProjects: AgileKeyProject[];
+  existingKeyResults: AgileKeyResult[];
+  idea: string;
+  objectives: AgileObjective[];
+  projectId: string;
+  projectName: string;
+  selectedKeyResult?: AgileKeyResult | null;
+}) {
+  const response = await fetch("/api/okrs/ai/key-project-draft", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileKeyProjectDraftSuccess>(
+    response,
+    "No fue posible generar el Key Project con IA."
   );
 }
 
@@ -669,6 +877,23 @@ export async function createAgileKeyResultInBackend(input: CreateAgileKeyResultI
   );
 }
 
+export async function updateAgileKeyResultInBackend(input: UpdateAgileKeyResultInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/okrs/key-results`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<AgileCreateKeyResultSuccess>(
+    response,
+    "No fue posible actualizar el Key Result de OKRs."
+  );
+}
+
 export async function createAgileKeyProjectInBackend(input: CreateAgileKeyProjectInput) {
   const backendBaseUrl = getBackendBaseUrl();
   const response = await fetchFromBackend(`${backendBaseUrl}/okrs/key-projects`, {
@@ -683,5 +908,300 @@ export async function createAgileKeyProjectInBackend(input: CreateAgileKeyProjec
   return parseOkrsBackendJson<AgileCreateKeyProjectSuccess>(
     response,
     "No fue posible crear el Key Project de OKRs."
+  );
+}
+
+export async function createSingularAgileKeyProjectInBackend(input: SingularAgileKeyProjectInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-projects`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyProjectWriteSuccess>(
+    response,
+    "No fue posible crear el Key Project en Singular Agile."
+  );
+}
+
+export async function createSingularAgileKeyResultInBackend(input: SingularAgileKeyResultInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-results`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyResultWriteSuccess>(
+    response,
+    "No fue posible crear el Key Result en Singular Agile."
+  );
+}
+
+export async function createSingularAgileObjectiveInBackend(input: SingularAgileObjectiveInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/objectives`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<SingularAgileObjectiveWriteSuccess>(
+    response,
+    "No fue posible crear el Objective en Singular Agile."
+  );
+}
+
+export async function updateSingularAgileObjectiveInBackend(input: SingularAgileObjectiveUpdateInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/objectives`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileObjectiveWriteSuccess>(
+    response,
+    "No fue posible actualizar el Objective en Singular Agile."
+  );
+}
+
+export async function updateSingularAgileKeyResultInBackend(input: SingularAgileKeyResultUpdateInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-results`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyResultWriteSuccess>(
+    response,
+    "No fue posible actualizar el Key Result en Singular Agile."
+  );
+}
+
+export async function updateSingularAgileKeyProjectInBackend(input: SingularAgileKeyProjectUpdateInput) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-projects`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyProjectWriteSuccess>(
+    response,
+    "No fue posible actualizar el Key Project en Singular Agile."
+  );
+}
+
+export async function createAgileObjective(input: CreateAgileObjectiveInput) {
+  const response = await fetch("/api/okrs/objectives", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileCreateObjectiveSuccess>(
+    response,
+    "No fue posible crear el Objective de OKRs."
+  );
+}
+
+export async function createAgileKeyResult(input: CreateAgileKeyResultInput) {
+  const response = await fetch("/api/okrs/key-results", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileCreateKeyResultSuccess>(
+    response,
+    "No fue posible crear el Key Result de OKRs."
+  );
+}
+
+export async function updateAgileKeyResult(input: UpdateAgileKeyResultInput) {
+  const response = await fetch("/api/okrs/key-results", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<AgileCreateKeyResultSuccess>(
+    response,
+    "No fue posible actualizar el Key Result de OKRs."
+  );
+}
+
+export async function createAgileKeyProject(input: CreateAgileKeyProjectInput) {
+  const response = await fetch("/api/okrs/key-projects", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileCreateKeyProjectSuccess>(
+    response,
+    "No fue posible crear el Key Project de OKRs."
+  );
+}
+
+export async function createSingularAgileKeyProject(input: SingularAgileKeyProjectInput) {
+  const response = await fetch("/api/singular-agile/key-projects", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyProjectWriteSuccess>(
+    response,
+    "No fue posible crear el Key Project en Singular Agile."
+  );
+}
+
+export async function createSingularAgileKeyResult(input: SingularAgileKeyResultInput) {
+  const response = await fetch("/api/singular-agile/key-results", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyResultWriteSuccess>(
+    response,
+    "No fue posible crear el Key Result en Singular Agile."
+  );
+}
+
+export async function createSingularAgileObjective(input: SingularAgileObjectiveInput) {
+  const response = await fetch("/api/singular-agile/objectives", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<SingularAgileObjectiveWriteSuccess>(
+    response,
+    "No fue posible crear el Objective en Singular Agile."
+  );
+}
+
+export async function updateSingularAgileObjective(input: SingularAgileObjectiveUpdateInput) {
+  const response = await fetch("/api/singular-agile/objectives", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileObjectiveWriteSuccess>(
+    response,
+    "No fue posible actualizar el Objective en Singular Agile."
+  );
+}
+
+export async function updateSingularAgileKeyResult(input: SingularAgileKeyResultUpdateInput) {
+  const response = await fetch("/api/singular-agile/key-results", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyResultWriteSuccess>(
+    response,
+    "No fue posible actualizar el Key Result en Singular Agile."
+  );
+}
+
+export async function updateSingularAgileKeyProject(input: SingularAgileKeyProjectUpdateInput) {
+  const response = await fetch("/api/singular-agile/key-projects", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyProjectWriteSuccess>(
+    response,
+    "No fue posible actualizar el Key Project en Singular Agile."
+  );
+}
+
+export async function sendOkrBotMessageInBackend(input: OkrBotChatInput & { collaboratorEmail: string }) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/okrs/bot/chat`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<OkrBotChatResponse>(
+    response,
+    "No fue posible consultar el OKR Bot."
+  );
+}
+
+export async function sendOkrBotMessage(input: OkrBotChatInput) {
+  const response = await fetch("/api/okrs/bot/chat", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<OkrBotChatResponse>(
+    response,
+    "No fue posible consultar el OKR Bot."
   );
 }

@@ -1,32 +1,43 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import { analyzeAgileKeyResultSentiments } from "../src/okrs/ai-key-result-sentiment.js";
+import { analyzeAgileObjectiveHealth } from "../src/okrs/ai-objective-health.js";
+import { analyzeAgilePortfolio } from "../src/okrs/ai-portfolio-analysis.js";
 import {
-  analyzeAgileObjectiveHealth,
-  analyzeAgilePortfolio,
-  analyzeAgileKeyResultSentiments,
-  createAgileKeyProject,
-  createAgileKeyResult,
-  createAgileObjective,
+  generateAgileKeyProjectDraft,
+  generateAgileKeyResultEditDraft,
   generateAgileKeyResultDraft,
-  generateAgileObjectiveDraft,
-  createTrustworthinessAssistantReply,
-  createTrustworthinessAssistantSession,
-  streamTrustworthinessAssistantMessage,
+  generateAgileObjectiveDraft
+} from "../src/okrs/ai-drafts.js";
+import { createAgileKeyProject, listAgileKeyProjectsForProject } from "../src/okrs/airtable-key-projects.js";
+import { listAgileKeyResultHistoryBulk } from "../src/okrs/airtable-key-result-history.js";
+import { createAgileKeyResult, updateAgileKeyResult } from "../src/okrs/airtable-key-results.js";
+import { createAgileObjective, listAgileObjectivesForProject } from "../src/okrs/airtable-objectives.js";
+import { listAgileProjectsForCollaborator } from "../src/okrs/airtable-projects.js";
+import { createOkrBotReply, type OkrBotAction } from "../src/okrs/bot-assistant.js";
+import {
+  createSingularAgileKeyProject,
+  updateSingularAgileKeyProject
+} from "../src/singular-agile/key-projects.js";
+import {
+  createSingularAgileKeyResult,
+  updateSingularAgileKeyResult
+} from "../src/singular-agile/key-results.js";
+import {
+  createSingularAgileObjective,
+  updateSingularAgileObjective
+} from "../src/singular-agile/objectives.js";
+import { createTrustworthinessAssistantReply, streamTrustworthinessAssistantMessage } from "../src/trustworthiness/assistant-reply.js";
+import { createTrustworthinessAssistantSession } from "../src/trustworthiness/assistant-session.js";
+import { findUserByEmail, listTrustworthinessRecords } from "../src/trustworthiness/airtable-records.js";
+import { saveTrustworthinessAssistantProposal, updateTrustworthinessRecord } from "../src/trustworthiness/airtable-update.js";
+import { getCoachingInputLogTranscript, listCoachingInputLogs } from "../src/trustworthiness/coaching-logs.js";
+import {
   createTrustworthinessFeedback,
   createTrustworthinessSuggestion,
-  streamTrustworthinessSuggestion,
-  findUserByEmail,
-  getCoachingInputLogTranscript,
-  listAgileKeyProjectsForProject,
-  listAgileKeyResultHistoryBulk,
-  listAgileObjectivesForProject,
-  listAgileProjectsForCollaborator,
-  listCoachingInputLogs,
-  listTrustworthinessRecords,
-  saveTrustworthinessAssistantProposal,
-  TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS,
-  updateTrustworthinessRecord
-} from "../src/airtable.js";
+  streamTrustworthinessSuggestion
+} from "../src/trustworthiness/suggestions.js";
+import { TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS } from "../src/trustworthiness/types.js";
 import { appConfig, getAssistantRuntimeConfig } from "../src/config.js";
 import type { AssistantStreamMessageBody } from "../src/trustworthiness-api.js";
 
@@ -42,6 +53,16 @@ type TrustworthinessQuery = {
 type AgileProjectsQuery = {
   collaboratorEmail?: string;
 };
+
+const agileProjectsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    payload?: Awaited<ReturnType<typeof listAgileProjectsForCollaborator>>;
+    promise?: ReturnType<typeof listAgileProjectsForCollaborator>;
+  }
+>();
+const agileProjectsCacheTtlMs = 30_000;
 
 type AgileObjectivesQuery = {
   projectId?: string;
@@ -95,9 +116,30 @@ type AgileObjectiveDraftBody = {
 
 type AgileKeyResultDraftBody = {
   existingKeyResults?: unknown[];
+  idea?: string;
   objective?: unknown;
   projectId?: string;
   projectName?: string;
+};
+
+type AgileKeyResultEditDraftBody = {
+  currentKeyResult?: unknown;
+  editInstructions?: string;
+  keyResultHistory?: unknown[];
+  objective?: unknown;
+  projectId?: string;
+  projectName?: string;
+  siblingKeyResults?: unknown[];
+};
+
+type AgileKeyProjectDraftBody = {
+  existingKeyProjects?: unknown[];
+  existingKeyResults?: unknown[];
+  idea?: string;
+  objectives?: unknown[];
+  projectId?: string;
+  projectName?: string;
+  selectedKeyResult?: unknown;
 };
 
 type CreateAgileObjectiveBody = {
@@ -128,6 +170,10 @@ type CreateAgileKeyResultBody = {
   targetValue?: number | null;
 };
 
+type UpdateAgileKeyResultBody = CreateAgileKeyResultBody & {
+  recordId?: string;
+};
+
 type CreateAgileKeyProjectBody = {
   dontShowInSingularStories?: boolean;
   epicStory?: string;
@@ -136,6 +182,45 @@ type CreateAgileKeyProjectBody = {
   projectId?: string;
   status?: "Active" | "Archived" | "Suggested by Resource";
   totalStories?: number | null;
+};
+
+type CreateSingularAgileKeyProjectBody = Record<string, unknown>;
+
+type CreateSingularAgileKeyResultBody = Record<string, unknown>;
+
+type UpdateSingularAgileKeyResultBody = Record<string, unknown> & {
+  recordId?: string;
+};
+
+type UpdateSingularAgileKeyProjectBody = Record<string, unknown> & {
+  recordId?: string;
+};
+
+type CreateSingularAgileObjectiveBody = Record<string, unknown>;
+
+type UpdateSingularAgileObjectiveBody = Record<string, unknown> & {
+  recordId?: string;
+};
+
+type OkrBotMessageBody = {
+  action?: OkrBotAction;
+  activeProposal?: {
+    draft?: unknown;
+    operation?: "create" | "edit";
+    targetType?: "key_project" | "key_result" | "objective";
+  };
+  collaboratorEmail?: string;
+  conversationHistory?: Array<{
+    role?: "assistant" | "user";
+    text?: string;
+  }>;
+  memoryLimit?: number;
+  message?: string;
+  objectiveId?: string;
+  projectId?: string;
+  projectName?: string;
+  targetLabel?: string;
+  targetId?: string;
 };
 
 type CoachingInputLogQuery = {
@@ -361,7 +446,29 @@ export function buildServer() {
       });
     }
 
-    const payload = await listAgileProjectsForCollaborator(collaboratorEmail);
+    const cachedEntry = agileProjectsCache.get(collaboratorEmail);
+    const now = Date.now();
+
+    if (cachedEntry && cachedEntry.expiresAt > now) {
+      const payload = cachedEntry.payload ?? (await cachedEntry.promise);
+
+      return reply.send({
+        ok: true,
+        ...payload
+      });
+    }
+
+    const promise = listAgileProjectsForCollaborator(collaboratorEmail);
+    agileProjectsCache.set(collaboratorEmail, {
+      expiresAt: now + agileProjectsCacheTtlMs,
+      promise
+    });
+
+    const payload = await promise;
+    agileProjectsCache.set(collaboratorEmail, {
+      expiresAt: Date.now() + agileProjectsCacheTtlMs,
+      payload
+    });
 
     return reply.send({
       ok: true,
@@ -424,6 +531,28 @@ export function buildServer() {
     });
 
     return reply.code(201).send({
+      ok: true,
+      ...payload
+    });
+  });
+
+  app.patch<{ Body: UpdateAgileKeyResultBody }>("/okrs/key-results", async (request, reply) => {
+    const payload = await updateAgileKeyResult({
+      currentValue: request.body.currentValue,
+      explanation: request.body.explanation,
+      initialValue: request.body.initialValue,
+      keyResult: request.body.keyResult,
+      metric: request.body.metric,
+      objectiveId: request.body.objectiveId,
+      projectId: request.body.projectId ?? "",
+      quarter: request.body.quarter,
+      recordId: request.body.recordId ?? "",
+      status: request.body.status,
+      targetDate: request.body.targetDate,
+      targetValue: request.body.targetValue
+    });
+
+    return reply.send({
       ok: true,
       ...payload
     });
@@ -536,9 +665,38 @@ export function buildServer() {
   app.post<{ Body: AgileKeyResultDraftBody }>("/okrs/ai/key-result-draft", async (request, reply) => {
     const payload = await generateAgileKeyResultDraft({
       existingKeyResults: Array.isArray(request.body.existingKeyResults) ? request.body.existingKeyResults : [],
+      idea: request.body.idea ?? "",
       objective: request.body.objective ?? null,
       projectId: request.body.projectId ?? "",
       projectName: request.body.projectName ?? ""
+    });
+
+    return reply.send(payload);
+  });
+
+  app.post<{ Body: AgileKeyResultEditDraftBody }>("/okrs/ai/key-result-edit-draft", async (request, reply) => {
+    const payload = await generateAgileKeyResultEditDraft({
+      currentKeyResult: request.body.currentKeyResult ?? null,
+      editInstructions: request.body.editInstructions ?? "",
+      keyResultHistory: Array.isArray(request.body.keyResultHistory) ? request.body.keyResultHistory : [],
+      objective: request.body.objective ?? null,
+      projectId: request.body.projectId ?? "",
+      projectName: request.body.projectName ?? "",
+      siblingKeyResults: Array.isArray(request.body.siblingKeyResults) ? request.body.siblingKeyResults : []
+    });
+
+    return reply.send(payload);
+  });
+
+  app.post<{ Body: AgileKeyProjectDraftBody }>("/okrs/ai/key-project-draft", async (request, reply) => {
+    const payload = await generateAgileKeyProjectDraft({
+      existingKeyProjects: Array.isArray(request.body.existingKeyProjects) ? request.body.existingKeyProjects : [],
+      existingKeyResults: Array.isArray(request.body.existingKeyResults) ? request.body.existingKeyResults : [],
+      idea: request.body.idea ?? "",
+      objectives: Array.isArray(request.body.objectives) ? request.body.objectives : [],
+      projectId: request.body.projectId ?? "",
+      projectName: request.body.projectName ?? "",
+      selectedKeyResult: request.body.selectedKeyResult ?? null
     });
 
     return reply.send(payload);
@@ -577,6 +735,72 @@ export function buildServer() {
       ok: true,
       ...payload
     });
+  });
+
+  app.post<{ Body: CreateSingularAgileKeyProjectBody }>("/singular-agile/key-projects", async (request, reply) => {
+    const payload = await createSingularAgileKeyProject(request.body);
+
+    return reply.code(payload.created ? 201 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.post<{ Body: CreateSingularAgileKeyResultBody }>("/singular-agile/key-results", async (request, reply) => {
+    const payload = await createSingularAgileKeyResult(request.body);
+
+    return reply.code(payload.created ? 201 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.patch<{ Body: UpdateSingularAgileKeyResultBody }>("/singular-agile/key-results", async (request, reply) => {
+    const { recordId, ...fields } = request.body;
+    const payload = await updateSingularAgileKeyResult(recordId, fields);
+
+    return reply.code(payload.updated ? 200 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.patch<{ Body: UpdateSingularAgileKeyProjectBody }>("/singular-agile/key-projects", async (request, reply) => {
+    const { recordId, ...fields } = request.body;
+    const payload = await updateSingularAgileKeyProject(recordId, fields);
+
+    return reply.code(payload.updated ? 200 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.post<{ Body: CreateSingularAgileObjectiveBody }>("/singular-agile/objectives", async (request, reply) => {
+    const payload = await createSingularAgileObjective(request.body);
+
+    return reply.code(payload.created ? 201 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.patch<{ Body: UpdateSingularAgileObjectiveBody }>("/singular-agile/objectives", async (request, reply) => {
+    const { recordId, ...fields } = request.body;
+    const payload = await updateSingularAgileObjective(recordId, fields);
+
+    return reply.code(payload.updated ? 200 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.post<{ Body: OkrBotMessageBody }>("/okrs/bot/chat", async (request, reply) => {
+    const projectId = request.body.projectId?.trim();
+
+    if (!projectId) {
+      return reply.code(400).send({
+        ok: false,
+        message: "El projectId es obligatorio."
+      });
+    }
+
+    const payload = await createOkrBotReply({
+      action: request.body.action,
+      activeProposal: request.body.activeProposal,
+      collaboratorEmail: request.body.collaboratorEmail?.trim().toLowerCase(),
+      conversationHistory: request.body.conversationHistory,
+      memoryLimit: request.body.memoryLimit,
+      message: request.body.message,
+      objectiveId: request.body.objectiveId,
+      projectId,
+      projectName: request.body.projectName,
+      targetLabel: request.body.targetLabel,
+      targetId: request.body.targetId
+    });
+
+    return reply.send(payload);
   });
 
   app.get<{ Querystring: CoachingInputLogQuery }>(

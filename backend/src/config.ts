@@ -143,3 +143,15 @@ export function getAgileAirtableConfig() {
     airtableAgileProjectsTableName: optional("AIRTABLE_AGILE_PROJECTS_TABLE_NAME") || "Projects"
   };
 }
+
+export function getSingularAgileAirtableConfig() {
+  return {
+    airtableSingularAgileApiToken: required("AIRTABLE_SINGULAR_AGILE_BASE_KEY"),
+    airtableSingularAgileBaseId: required("AIRTABLE_SINGULAR_AGILE_BASE_ID"),
+    airtableSingularAgileKeyProjectTableName:
+      optional("AIRTABLE_SINGULAR_AGILE_KEY_PROJECT_TABLE_NAME") || "Epics",
+    airtableSingularAgileKeyResultTableName: optional("AIRTABLE_SINGULAR_AGILE_KEY_RESULT_TABLE_NAME"),
+    airtableSingularAgileObjectiveTableName: optional("AIRTABLE_SINGULAR_AGILE_OBJECTIVE_TABLE_NAME"),
+    airtableSingularAgileStoriesTableName: optional("AIRTABLE_SINGULAR_AGILE_STORIES_TABLE_NAME")
+  };
+}

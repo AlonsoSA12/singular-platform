@@ -1,4 +1,4 @@
-import { createTrustworthinessFeedback } from "../../../src/airtable.js";
+import { createTrustworthinessFeedback } from "../../../src/trustworthiness/suggestions.js";
 import {
   badRequestResponse,
   getNormalizedEmailParam,

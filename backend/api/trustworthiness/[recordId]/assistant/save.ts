@@ -1,4 +1,4 @@
-import { saveTrustworthinessAssistantProposal } from "../../../../src/airtable.js";
+import { saveTrustworthinessAssistantProposal } from "../../../../src/trustworthiness/airtable-update.js";
 import {
   badRequestResponse,
   getNormalizedEmailParam,

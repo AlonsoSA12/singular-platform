@@ -1,4 +1,4 @@
-import { createAgileKeyProject, listAgileKeyProjectsForProject } from "../../src/airtable.js";
+import { createAgileKeyProject, listAgileKeyProjectsForProject } from "../../src/okrs/airtable-key-projects.js";
 
 export async function GET(request: Request) {
   try {

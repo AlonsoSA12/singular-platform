@@ -1,4 +1,4 @@
-import { updateTrustworthinessRecord } from "../../src/airtable.js";
+import { updateTrustworthinessRecord } from "../../src/trustworthiness/airtable-update.js";
 import {
   badRequestResponse,
   getNormalizedEmailParam,

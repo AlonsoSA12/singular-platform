@@ -1,4 +1,4 @@
-import { analyzeAgileObjectiveHealth } from "../../src/airtable.js";
+import { analyzeAgileObjectiveHealth } from "../../src/okrs/ai-objective-health.js";
 
 export async function POST(request: Request) {
   try {

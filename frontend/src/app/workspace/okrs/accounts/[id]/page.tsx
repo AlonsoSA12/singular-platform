@@ -10,5 +10,5 @@ export default async function WorkspaceOkrsAccountDetailPage({
   params
 }: WorkspaceOkrsAccountDetailPageProps) {
   await params;
-  redirect("/workspace/okrs");
+  redirect("/workspace/portfolio-analysis");
 }

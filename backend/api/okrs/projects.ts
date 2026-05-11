@@ -1,4 +1,4 @@
-import { listAgileProjectsForCollaborator } from "../../src/airtable.js";
+import { listAgileProjectsForCollaborator } from "../../src/okrs/airtable-projects.js";
 
 export async function GET(request: Request) {
   try {

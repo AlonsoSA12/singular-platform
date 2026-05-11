@@ -1,4 +1,4 @@
-import { TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS } from "./airtable.js";
+import { TRUSTWORTHINESS_SUGGESTION_STAGE_LABELS } from "./trustworthiness/types.js";
 
 export type UpdateTrustworthinessBody = {
   credibilityAiJson?: string | null;

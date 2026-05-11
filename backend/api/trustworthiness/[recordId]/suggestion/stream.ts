@@ -1,4 +1,4 @@
-import { streamTrustworthinessSuggestion } from "../../../../src/airtable.js";
+import { streamTrustworthinessSuggestion } from "../../../../src/trustworthiness/suggestions.js";
 import {
   getNormalizedEmailParam,
   getPathSegmentFromEnd,

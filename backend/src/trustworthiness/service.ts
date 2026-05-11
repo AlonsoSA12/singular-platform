@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getAgileAirtableConfig, getAirtableConfig, getOpenAIConfig } from "./config.js";
+import { getAgileAirtableConfig, getAirtableConfig, getOpenAIConfig } from "../config.js";
 
 type AirtableRecord = {
   createdTime?: string;
@@ -134,9 +134,48 @@ type AgileObjectiveDraftInput = {
   projectName: string;
 };
 
+type AgileObjectiveEditDraftInput = {
+  currentObjective: unknown;
+  editInstructions: string;
+  keyProjects?: unknown[];
+  keyResults?: unknown[];
+  projectId: string;
+  projectName: string;
+};
+
 type AgileKeyResultDraftInput = {
   existingKeyResults?: unknown[];
+  idea: string;
   objective: unknown;
+  projectId: string;
+  projectName: string;
+};
+
+type AgileKeyResultEditDraftInput = {
+  currentKeyResult: unknown;
+  editInstructions: string;
+  keyResultHistory?: unknown[];
+  objective?: unknown;
+  siblingKeyResults?: unknown[];
+  projectId: string;
+  projectName: string;
+};
+
+type AgileKeyProjectDraftInput = {
+  existingKeyProjects?: unknown[];
+  existingKeyResults?: unknown[];
+  idea: string;
+  objectives?: unknown[];
+  projectId: string;
+  projectName: string;
+  selectedKeyResult?: unknown;
+};
+
+type AgileKeyProjectEditDraftInput = {
+  currentKeyProject: unknown;
+  editInstructions: string;
+  existingKeyResults?: unknown[];
+  objectives?: unknown[];
   projectId: string;
   projectName: string;
 };
@@ -160,6 +199,43 @@ type FetchAirtableRecordsOptions = {
   fields?: string[];
   filterByFormula?: string;
 };
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function getAirtableRetryDelay(response: Response, attempt: number) {
+  const retryAfter = response.headers.get("retry-after");
+  const retryAfterSeconds = retryAfter ? Number.parseFloat(retryAfter) : Number.NaN;
+
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return retryAfterSeconds * 1000;
+  }
+
+  return [750, 1500, 3000][attempt] ?? 3000;
+}
+
+async function fetchAirtableWithRetry(url: URL, apiToken: string) {
+  const maxAttempts = 4;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${apiToken}`
+      }
+    });
+
+    if (response.ok || (response.status !== 429 && response.status < 500) || attempt === maxAttempts - 1) {
+      return response;
+    }
+
+    await wait(getAirtableRetryDelay(response, attempt));
+  }
+
+  throw new Error("Airtable request failed before receiving a response.");
+}
 
 type DateRangeLiteral = {
   end: string;
@@ -421,11 +497,11 @@ type OpenAITextStreamHandlers = {
   onDelta?: (delta: string) => void | Promise<void>;
 };
 
-function escapeFormulaValue(value: string) {
+export function escapeFormulaValue(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
 }
 
-function escapeRegexValue(value: string) {
+export function escapeRegexValue(value: string) {
   return value.replace(/[|\\{}()[\]^$+*?.-]/g, "\\$&");
 }
 
@@ -642,7 +718,7 @@ export async function findUserByEmail(email: string) {
   };
 }
 
-async function fetchAirtableRecords(
+export async function fetchAirtableRecords(
   tableName: string,
   options: FetchAirtableRecordsOptions = {}
 ) {
@@ -669,11 +745,7 @@ async function fetchAirtableRecords(
       url.searchParams.set("offset", offset);
     }
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiToken}`
-      }
-    });
+    const response = await fetchAirtableWithRetry(url, apiToken);
 
     if (!response.ok) {
       let details = "";
@@ -705,7 +777,7 @@ async function fetchAirtableRecords(
   return records;
 }
 
-function dedupeAirtableRecords(records: AirtableRecord[]) {
+export function dedupeAirtableRecords(records: AirtableRecord[]) {
   const uniqueRecords = new Map<string, AirtableRecord>();
 
   for (const record of records) {
@@ -717,7 +789,7 @@ function dedupeAirtableRecords(records: AirtableRecord[]) {
   return [...uniqueRecords.values()];
 }
 
-function getTrustworthinessTableName() {
+export function getTrustworthinessTableName() {
   const airtableConfig = getAirtableConfig();
 
   if (!airtableConfig.airtableTrustworthinessTableName) {
@@ -735,7 +807,7 @@ function getCoachingInputLogTableName() {
   return airtableConfig.airtableCoachingInputLogTableName || "coaching_input_log";
 }
 
-function getCoachingInputLogConnection() {
+export function getCoachingInputLogConnection() {
   const airtableConfig = getAirtableConfig();
 
   return {
@@ -745,7 +817,7 @@ function getCoachingInputLogConnection() {
   };
 }
 
-function getAgileAirtableConnection() {
+export function getAgileAirtableConnection() {
   const agileConfig = getAgileAirtableConfig();
   const resolveTableName = (tableName: string, tableId: string) =>
     tableName === "Key Result" || tableName === "Key Project" || tableName === "Key Result History"
@@ -801,6 +873,7 @@ function mapAgileProject(record: AirtableRecord) {
   return {
     id: record.id,
     sourceRecordId:
+      getFirstTextValue(getFieldValue(record.fields, "source_record_id")) ??
       getFirstTextValue(getFieldValue(record.fields, "recordID")) ??
       getFirstTextValue(getFieldValue(record.fields, "recordid")) ??
       "",
@@ -838,7 +911,7 @@ function normalizeAirtableFieldName(fieldName: string) {
   return fieldName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-function getFieldValue(fields: Record<string, unknown>, fieldName: string) {
+export function getFieldValue(fields: Record<string, unknown>, fieldName: string) {
   if (fieldName in fields) {
     return fields[fieldName];
   }
@@ -854,19 +927,19 @@ function getFieldValue(fields: Record<string, unknown>, fieldName: string) {
   return entry?.[1];
 }
 
-function getTextField(fields: Record<string, unknown>, fieldName: string) {
+export function getTextField(fields: Record<string, unknown>, fieldName: string) {
   const value = getFieldValue(fields, fieldName);
 
   return typeof value === "string" ? value.trim() : "";
 }
 
-function getNumberField(fields: Record<string, unknown>, fieldName: string) {
+export function getNumberField(fields: Record<string, unknown>, fieldName: string) {
   const value = getFieldValue(fields, fieldName);
 
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function getBooleanField(fields: Record<string, unknown>, fieldName: string) {
+export function getBooleanField(fields: Record<string, unknown>, fieldName: string) {
   return getFieldValue(fields, fieldName) === true;
 }
 
@@ -917,7 +990,7 @@ function normalizeNullablePercentInput(value: number | null | undefined) {
   return value > 1 ? value / 100 : value;
 }
 
-function calculateAgileKeyResultProgress(input: {
+export function calculateAgileKeyResultProgress(input: {
   currentValue?: number | null;
   initialValue?: number | null;
   targetValue?: number | null;
@@ -936,7 +1009,7 @@ function calculateAgileKeyResultProgress(input: {
   return Math.max(0, Math.min(100, Math.round(((currentValue - initialValue) / (targetValue - initialValue)) * 100)));
 }
 
-function normalizeScoreObjetives(value: number | null) {
+export function normalizeScoreObjetives(value: number | null) {
   if (value === null) {
     return null;
   }
@@ -952,7 +1025,7 @@ function normalizeScoreObjetives(value: number | null) {
   return Math.round(value);
 }
 
-function getPercentField(fields: Record<string, unknown>, fieldName: string) {
+export function getPercentField(fields: Record<string, unknown>, fieldName: string) {
   const value = fields[fieldName];
 
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -1010,6 +1083,11 @@ function mapAgileKeyResult(record: AirtableRecord) {
     initialValue,
     metric: getTextField(fields, "Metric"),
     progress,
+    sourceRecordId:
+      getFirstTextValue(getFieldValue(fields, "record_id")) ??
+      getFirstTextValue(getFieldValue(fields, "Record Id")) ??
+      getFirstTextValue(getFieldValue(fields, "recordId")) ??
+      "",
     status: getTextField(fields, "Status"),
     targetDate: getTextField(fields, "Target Date"),
     targetValue,
@@ -1108,7 +1186,11 @@ function mapAgileObjective(record: AirtableRecord) {
     priority: getTextField(fields, "Priority"),
     projectIds,
     quarter: getTextField(fields, "Quarter"),
-    recordId: getTextField(fields, "Record Id"),
+    recordId:
+      getFirstTextValue(getFieldValue(fields, "record_id")) ??
+      getFirstTextValue(getFieldValue(fields, "Record Id")) ??
+      getFirstTextValue(getFieldValue(fields, "recordId")) ??
+      "",
     score,
     status: getOptionalObjectiveStatus(getFieldValue(fields, "Status")),
     targetDate: getTextField(fields, "Target Date"),
@@ -1116,7 +1198,7 @@ function mapAgileObjective(record: AirtableRecord) {
   };
 }
 
-function normalizePercentLike(value: number | null) {
+export function normalizePercentLike(value: number | null) {
   if (value === null) {
     return 0;
   }
@@ -1167,6 +1249,11 @@ function mapAgileKeyProject(record: AirtableRecord) {
     name: getTextField(fields, "Epic Name"),
     projectIds,
     qualityScore,
+    sourceRecordId:
+      getFirstTextValue(getFieldValue(fields, "source_record_id")) ??
+      getFirstTextValue(getFieldValue(fields, "Record Id")) ??
+      getFirstTextValue(getFieldValue(fields, "recordId")) ??
+      "",
     strategicFocus: getNumberField(fields, "Strategic Focus"),
     story: getTextField(fields, "Epic Story"),
     status: getTextField(fields, "Status"),
@@ -1991,10 +2078,240 @@ const agileObjectiveDraftSchema = {
   type: "object"
 } satisfies Record<string, unknown>;
 
+const agileObjectiveEditDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    draft: {
+      additionalProperties: false,
+      properties: {
+        description: {
+          type: "string"
+        },
+        explanation: {
+          type: "string"
+        },
+        metric: {
+          type: "string"
+        },
+        objective: {
+          type: "string"
+        },
+        priority: {
+          type: "string"
+        },
+        recordId: {
+          type: "string"
+        },
+        status: {
+          enum: ["Achieved", "In Progress", "Pending Review", "Underachieved"],
+          type: "string"
+        },
+        targetDate: {
+          type: "string"
+        },
+        type: {
+          type: "string"
+        }
+      },
+      required: [
+        "description",
+        "explanation",
+        "metric",
+        "objective",
+        "priority",
+        "recordId",
+        "status",
+        "targetDate",
+        "type"
+      ],
+      type: "object"
+    }
+  },
+  required: ["draft"],
+  type: "object"
+} satisfies Record<string, unknown>;
+
 const agileSingleKeyResultDraftSchema = {
   additionalProperties: false,
   properties: {
     draft: agileKeyResultDraftSchema
+  },
+  required: ["draft"],
+  type: "object"
+} satisfies Record<string, unknown>;
+
+const agileKeyResultEditDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    draft: {
+      additionalProperties: false,
+      properties: {
+        currentValue: {
+          type: ["number", "null"]
+        },
+        explanation: {
+          type: "string"
+        },
+        initialValue: {
+          type: ["number", "null"]
+        },
+        keyResult: {
+          type: "string"
+        },
+        metric: {
+          type: "string"
+        },
+        objectiveId: {
+          type: "string"
+        },
+        recordId: {
+          type: "string"
+        },
+        status: {
+          enum: ["Done", "In progress", "Todo"],
+          type: "string"
+        },
+        targetDate: {
+          type: "string"
+        },
+        targetValue: {
+          type: ["number", "null"]
+        }
+      },
+      required: [
+        "currentValue",
+        "explanation",
+        "initialValue",
+        "keyResult",
+        "metric",
+        "objectiveId",
+        "recordId",
+        "status",
+        "targetDate",
+        "targetValue"
+      ],
+      type: "object"
+    }
+  },
+  required: ["draft"],
+  type: "object"
+} satisfies Record<string, unknown>;
+
+const agileKeyProjectDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    draft: {
+      additionalProperties: false,
+      properties: {
+        clarity: {
+          type: "number"
+        },
+        epicStory: {
+          type: "string"
+        },
+        finalScore: {
+          type: "number"
+        },
+        justification: {
+          type: "string"
+        },
+        keyResultIds: {
+          items: {
+            type: "string"
+          },
+          type: "array"
+        },
+        name: {
+          type: "string"
+        },
+        projectId: {
+          type: "string"
+        },
+        status: {
+          enum: ["Suggested by Resource"],
+          type: "string"
+        },
+        strategicFocus: {
+          type: "number"
+        },
+        valueOrientation: {
+          type: "number"
+        }
+      },
+      required: [
+        "clarity",
+        "epicStory",
+        "finalScore",
+        "justification",
+        "keyResultIds",
+        "name",
+        "projectId",
+        "status",
+        "strategicFocus",
+        "valueOrientation"
+      ],
+      type: "object"
+    }
+  },
+  required: ["draft"],
+  type: "object"
+} satisfies Record<string, unknown>;
+
+const agileKeyProjectEditDraftSchema = {
+  additionalProperties: false,
+  properties: {
+    draft: {
+      additionalProperties: false,
+      properties: {
+        clarity: {
+          type: "number"
+        },
+        epicStory: {
+          type: "string"
+        },
+        finalScore: {
+          type: "number"
+        },
+        justification: {
+          type: "string"
+        },
+        keyResultIds: {
+          items: {
+            type: "string"
+          },
+          type: "array"
+        },
+        name: {
+          type: "string"
+        },
+        recordId: {
+          type: "string"
+        },
+        status: {
+          enum: ["Suggested by Resource"],
+          type: "string"
+        },
+        strategicFocus: {
+          type: "number"
+        },
+        valueOrientation: {
+          type: "number"
+        }
+      },
+      required: [
+        "clarity",
+        "epicStory",
+        "finalScore",
+        "justification",
+        "keyResultIds",
+        "name",
+        "recordId",
+        "status",
+        "strategicFocus",
+        "valueOrientation"
+      ],
+      type: "object"
+    }
   },
   required: ["draft"],
   type: "object"
@@ -2053,19 +2370,74 @@ export async function generateAgileObjectiveDraft(input: AgileObjectiveDraftInpu
   };
 }
 
+export async function generateAgileObjectiveEditDraft(input: AgileObjectiveEditDraftInput) {
+  const editInstructions = requireNonEmptyString(input.editInstructions, "Objective edit instructions");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const projectName = requireNonEmptyString(input.projectName, "Project name");
+  const model = getAgileDraftModel();
+  const prompt = [
+    "Generate one edit proposal for the selected Objective in an OKR platform.",
+    "The selected Objective target is fixed. Do not ask the user to choose another Objective, and do not switch targets.",
+    "Use the user's edit instructions to improve only the selected Objective.",
+    "Preserve existing values unless the user's edit instructions require a change.",
+    "The Objective must remain outcome-focused, specific, and suitable for a product/project team.",
+    "Use only the chatbot Objective edit contract: recordId, objective, description, explanation, metric, priority, status, targetDate, and type.",
+    "Do not suggest, request, or output fields outside that contract.",
+    "Never output Name, Quarter, Score Objetives, Key Results, calculated fields, lookup fields, rollup fields, Project, projectIds, or internal Airtable fields.",
+    "Use Achieved, In Progress, Pending Review, or Underachieved for status. Preserve the current status unless the user explicitly asks to change it or the edit clearly implies it.",
+    JSON.stringify(
+      {
+        currentObjective: input.currentObjective,
+        editInstructions,
+        keyProjects: input.keyProjects ?? [],
+        keyResults: input.keyResults ?? [],
+        project: {
+          id: projectId,
+          name: projectName
+        }
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+  const responseText = await callConfiguredModelForJson({
+    input: prompt,
+    model,
+    schema: agileObjectiveEditDraftSchema,
+    schemaName: "agile_objective_edit_draft"
+  });
+  const parsed = JSON.parse(responseText ?? "{}") as {
+    draft?: unknown;
+  };
+
+  if (!parsed.draft) {
+    throw new Error("La IA no devolvió un borrador de edición de Objective válido.");
+  }
+
+  return {
+    draft: parsed.draft,
+    model,
+    ok: true
+  };
+}
+
 export async function generateAgileKeyResultDraft(input: AgileKeyResultDraftInput) {
+  const idea = requireNonEmptyString(input.idea, "Key Result idea");
   const projectId = requireNonEmptyString(input.projectId, "Project");
   const projectName = requireNonEmptyString(input.projectName, "Project name");
   const model = getAgileDraftModel();
   const prompt = [
     "Generate one measurable Key Result draft for an OKR platform.",
-    "Use the project and Objective context. Avoid duplicating existing Key Results.",
+    "Use the user's Key Result idea as the primary intent. Refine it using the project and Objective context. Avoid duplicating existing Key Results.",
     "The Key Result must be measurable, time-bound, and coherent with the Objective.",
-    "Return metric, initialValue, currentValue, targetValue, targetDate, status, and explanation.",
+    "Return only the Key Result create draft contract: keyResult, metric, explanation, status, initialValue, currentValue, targetValue, and targetDate.",
+    "Do not suggest, request, mention, or output fields outside that create contract.",
+    "Never output Quarter, Progress, Progress Number, Score Key Result, Key Result History, calculated fields, lookup fields, rollup fields, Project, Objective, projectIds, objectiveIds, projectId, or objectiveId.",
     "Use decimal percentages for percentage values: 0.35 means 35%. If a metric is a count or time value, use the natural numeric value.",
     JSON.stringify(
       {
         existingKeyResults: input.existingKeyResults ?? [],
+        keyResultIdea: idea,
         objective: input.objective,
         project: {
           id: projectId,
@@ -2088,6 +2460,174 @@ export async function generateAgileKeyResultDraft(input: AgileKeyResultDraftInpu
 
   if (!parsed.draft) {
     throw new Error("La IA no devolvió un borrador de Key Result válido.");
+  }
+
+  return {
+    draft: parsed.draft,
+    model,
+    ok: true
+  };
+}
+
+export async function generateAgileKeyResultEditDraft(input: AgileKeyResultEditDraftInput) {
+  const editInstructions = requireNonEmptyString(input.editInstructions, "Key Result edit instructions");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const projectName = requireNonEmptyString(input.projectName, "Project name");
+  const model = getAgileDraftModel();
+  const prompt = [
+    "Generate one edit proposal for the selected Key Result in an OKR platform.",
+    "The selected Key Result target is fixed. Do not ask the user to choose another Key Result, and do not switch targets.",
+    "Use the user's edit instructions to improve only the selected Key Result.",
+    "Do not ask the user to choose or change Objective during a normal Key Result edit.",
+    "Preserve objectiveId exactly unless the user explicitly asks to move this Key Result to another Objective.",
+    "Preserve existing values unless the user's edit instructions require a change.",
+    "The Key Result must remain measurable, time-bound, and coherent with its Objective.",
+    "Use only the chatbot Key Result edit contract: recordId, keyResult, metric, explanation, status, initialValue, currentValue, targetValue, targetDate, and objectiveId.",
+    "Do not suggest, request, or output fields outside that contract.",
+    "Never output Progress, Progress Number, Score Key Result, Key Result History, calculated fields, or internal Airtable fields.",
+    "Use decimal percentages for percentage values: 0.35 means 35%. If a metric is a count or time value, use the natural numeric value.",
+    "Use Todo, In progress, or Done for status. Preserve the current status unless the user explicitly asks to change it or the edit clearly implies it.",
+    JSON.stringify(
+      {
+        currentKeyResult: input.currentKeyResult,
+        editInstructions,
+        keyResultHistory: input.keyResultHistory ?? [],
+        objective: input.objective ?? null,
+        project: {
+          id: projectId,
+          name: projectName
+        },
+        siblingKeyResults: input.siblingKeyResults ?? []
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+  const responseText = await callConfiguredModelForJson({
+    input: prompt,
+    model,
+    schema: agileKeyResultEditDraftSchema,
+    schemaName: "agile_key_result_edit_draft"
+  });
+  const parsed = JSON.parse(responseText ?? "{}") as {
+    draft?: unknown;
+  };
+
+  if (!parsed.draft) {
+    throw new Error("La IA no devolvió un borrador de edición de Key Result válido.");
+  }
+
+  return {
+    draft: parsed.draft,
+    model,
+    ok: true
+  };
+}
+
+export async function generateAgileKeyProjectDraft(input: AgileKeyProjectDraftInput) {
+  const idea = requireNonEmptyString(input.idea, "Key Project idea");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const projectName = requireNonEmptyString(input.projectName, "Project name");
+  const model = getAgileDraftModel();
+  const prompt = [
+    "Generate one Key Project draft for an OKR platform.",
+    "A Key Project is delivery work, similar to an Epic, that should move one or more Key Results.",
+    "Use the user's idea as the primary intent, but rewrite it into a clear, useful execution proposal.",
+    "Use project context, Objectives, Key Results, existing Key Projects, and the selected Key Result when provided.",
+    "The draft must not copy the user's wording verbatim unless it is already polished.",
+    "The name must be concise, executive, and action-oriented.",
+    "The epicStory must describe what will be built or delivered, who it helps, and how it supports the OKR outcome.",
+    "The justification must explicitly connect the Key Project to the selected Key Result when one is provided.",
+    "Always use Suggested by Resource for status.",
+    "Use the selected Key Result sourceRecordId/id in keyResultIds when provided. Otherwise return an empty array.",
+    "Use only the chatbot Key Project draft contract: name, epicStory, justification, clarity, strategicFocus, valueOrientation, finalScore, status, and keyResultIds.",
+    "Do not suggest, request, or output fields outside that contract.",
+    "Never mention Stories, Total Stories, AI Stories Assist, calculated fields, or internal Airtable fields unless the user explicitly asks about them.",
+    "Return numeric quality scores from 0 to 1 for clarity, strategicFocus, valueOrientation, and finalScore so the user can review and confirm them.",
+    "Use clarity for how well-scoped and understandable the delivery work is.",
+    "Use strategicFocus for how directly the work supports the selected KR or strongest related OKR outcome.",
+    "Use valueOrientation for how clearly the work improves user/client/product value.",
+    "Use finalScore as an overall weighted quality signal. Do not return null scores.",
+    JSON.stringify(
+      {
+        existingKeyProjects: input.existingKeyProjects ?? [],
+        existingKeyResults: input.existingKeyResults ?? [],
+        keyProjectIdea: idea,
+        objectives: input.objectives ?? [],
+        project: {
+          id: projectId,
+          name: projectName
+        },
+        selectedKeyResult: input.selectedKeyResult ?? null
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+  const responseText = await callConfiguredModelForJson({
+    input: prompt,
+    model,
+    schema: agileKeyProjectDraftSchema,
+    schemaName: "agile_key_project_draft"
+  });
+  const parsed = JSON.parse(responseText ?? "{}") as {
+    draft?: unknown;
+  };
+
+  if (!parsed.draft) {
+    throw new Error("La IA no devolvió un borrador de Key Project válido.");
+  }
+
+  return {
+    draft: parsed.draft,
+    model,
+    ok: true
+  };
+}
+
+export async function generateAgileKeyProjectEditDraft(input: AgileKeyProjectEditDraftInput) {
+  const editInstructions = requireNonEmptyString(input.editInstructions, "Key Project edit instructions");
+  const projectId = requireNonEmptyString(input.projectId, "Project");
+  const projectName = requireNonEmptyString(input.projectName, "Project name");
+  const model = getAgileDraftModel();
+  const prompt = [
+    "Generate one edit proposal for the selected Key Project in an OKR platform.",
+    "The selected Key Project target is fixed. Do not ask the user to choose another Key Project, and do not switch targets.",
+    "Use the user's edit instructions to improve only the selected Key Project.",
+    "Use only the chatbot Key Project edit contract: recordId, name, epicStory, justification, clarity, strategicFocus, valueOrientation, finalScore, status, and keyResultIds.",
+    "Do not suggest, request, or output fields outside that contract.",
+    "Never mention Stories, Total Stories, AI Stories Assist, calculated fields, or internal Airtable fields unless the user explicitly asks about them.",
+    "If the user does not explicitly ask to change, connect, remove, or replace Key Results, preserve the current keyResultIds exactly.",
+    "Use Suggested by Resource for status.",
+    "Return numeric quality scores from 0 to 1 for clarity, strategicFocus, valueOrientation, and finalScore.",
+    "Rewrite name, epicStory, and justification only as much as needed to satisfy the user's edit instructions.",
+    JSON.stringify(
+      {
+        currentKeyProject: input.currentKeyProject,
+        editInstructions,
+        existingKeyResults: input.existingKeyResults ?? [],
+        objectives: input.objectives ?? [],
+        project: {
+          id: projectId,
+          name: projectName
+        }
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+  const responseText = await callConfiguredModelForJson({
+    input: prompt,
+    model,
+    schema: agileKeyProjectEditDraftSchema,
+    schemaName: "agile_key_project_edit_draft"
+  });
+  const parsed = JSON.parse(responseText ?? "{}") as {
+    draft?: unknown;
+  };
+
+  if (!parsed.draft) {
+    throw new Error("La IA no devolvió un borrador de edición de Key Project válido.");
   }
 
   return {
@@ -2291,7 +2831,7 @@ function extractEmailsFromParticipant(value: string) {
   return [...new Set(matches.map((email) => normalizeEmail(email)))];
 }
 
-function chunkArray<T>(items: T[], size: number) {
+export function chunkArray<T>(items: T[], size: number) {
   const chunks: T[][] = [];
 
   for (let index = 0; index < items.length; index += size) {
@@ -2301,7 +2841,7 @@ function chunkArray<T>(items: T[], size: number) {
   return chunks;
 }
 
-function buildRecordIdsFilterFormula(recordIds: string[]) {
+export function buildRecordIdsFilterFormula(recordIds: string[]) {
   if (recordIds.length === 0) {
     return "";
   }
@@ -2315,7 +2855,7 @@ function buildRecordIdsFilterFormula(recordIds: string[]) {
     .join(",")})`;
 }
 
-async function fetchRecordsByIds(
+export async function fetchRecordsByIds(
   tableName: string,
   recordIds: string[],
   fields: string[],
@@ -2341,7 +2881,7 @@ async function fetchRecordsByIds(
   return dedupeAirtableRecords(records.flat());
 }
 
-async function updateAirtableRecord(
+export async function updateAirtableRecord(
   tableName: string,
   recordId: string,
   fields: Record<string, unknown>,
@@ -2398,7 +2938,7 @@ async function updateAirtableRecord(
   return (await response.json()) as AirtableRecord;
 }
 
-async function createAirtableRecord(
+export async function createAirtableRecord(
   tableName: string,
   fields: Record<string, unknown>,
   connection?: { apiToken: string; baseId: string }
@@ -2455,7 +2995,7 @@ async function createAirtableRecord(
   return (await response.json()) as AirtableRecord;
 }
 
-function getLinkedRecordIds(value: unknown) {
+export function getLinkedRecordIds(value: unknown) {
   if (!Array.isArray(value)) {
     return [] as string[];
   }
@@ -2463,7 +3003,7 @@ function getLinkedRecordIds(value: unknown) {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
-function getFirstTextValue(value: unknown) {
+export function getFirstTextValue(value: unknown) {
   if (typeof value === "string" && value.trim().length > 0) {
     return value.trim();
   }
@@ -2481,7 +3021,7 @@ function getFirstTextValue(value: unknown) {
   return null;
 }
 
-function getFirstPersonEmail(value: unknown) {
+export function getFirstPersonEmail(value: unknown) {
   if (!Array.isArray(value)) {
     return null;
   }
@@ -3778,7 +4318,7 @@ const TRUSTWORTHINESS_ASSISTANT_REPLY_SCHEMA = {
   }
 };
 
-function extractOpenAIOutputText(payload: unknown) {
+export function extractOpenAIOutputText(payload: unknown) {
   if (isPlainRecord(payload) && typeof payload.output_text === "string") {
     return payload.output_text;
   }
@@ -3802,7 +4342,7 @@ function extractOpenAIOutputText(payload: unknown) {
   return null;
 }
 
-function extractDeepSeekOutputText(payload: unknown) {
+export function extractDeepSeekOutputText(payload: unknown) {
   if (!isPlainRecord(payload) || !Array.isArray(payload.choices)) {
     return null;
   }

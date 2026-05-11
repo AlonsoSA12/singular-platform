@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const payload = await generateAgileKeyResultDraftInBackend({
       existingKeyResults: Array.isArray(body?.existingKeyResults) ? body.existingKeyResults : [],
+      idea: typeof body?.idea === "string" ? body.idea : "",
       objective: body?.objective ?? null,
       projectId: typeof body?.projectId === "string" ? body.projectId : "",
       projectName: typeof body?.projectName === "string" ? body.projectName : ""

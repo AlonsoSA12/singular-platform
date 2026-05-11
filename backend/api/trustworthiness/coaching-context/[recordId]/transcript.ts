@@ -1,4 +1,4 @@
-import { getCoachingInputLogTranscript } from "../../../../src/airtable.js";
+import { getCoachingInputLogTranscript } from "../../../../src/trustworthiness/coaching-logs.js";
 import {
   badRequestResponse,
   getNormalizedEmailParam,

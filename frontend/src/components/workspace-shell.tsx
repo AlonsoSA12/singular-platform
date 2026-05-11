@@ -15,7 +15,7 @@ type WorkspaceShellProps = {
   userInitial: string;
 };
 
-type RailIconName = "okrs" | "portfolio" | "tw";
+type RailIconName = "bot" | "okrs" | "portfolio" | "tw";
 
 function RailIcon({ name }: { name: RailIconName }) {
   if (name === "tw") {
@@ -38,6 +38,19 @@ function RailIcon({ name }: { name: RailIconName }) {
         <path d="M12 18.5v3" />
         <path d="M2.5 12h3" />
         <path d="M18.5 12h3" />
+      </svg>
+    );
+  }
+
+  if (name === "bot") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <rect x="5" y="7.5" width="14" height="11" rx="3" />
+        <path d="M12 7.5V4.5" />
+        <path d="M9.5 4.5h5" />
+        <path d="M8.8 12h.01" />
+        <path d="M15.2 12h.01" />
+        <path d="M9.5 15h5" />
       </svg>
     );
   }
@@ -88,7 +101,13 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
           {WORKSPACE_MODULES.map((module) => {
             const isActive = module.id === activeModule;
             const iconName: RailIconName =
-              module.id === "okrs" ? "okrs" : module.id === "portfolio-analysis" ? "portfolio" : "tw";
+              module.id === "okrs"
+                ? "okrs"
+                : module.id === "okr-bot"
+                  ? "bot"
+                  : module.id === "portfolio-analysis"
+                    ? "portfolio"
+                    : "tw";
 
             return (
               <Link

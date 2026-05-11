@@ -1,4 +1,4 @@
-import { analyzeAgilePortfolio } from "../../src/airtable.js";
+import { analyzeAgilePortfolio } from "../../src/okrs/ai-portfolio-analysis.js";
 
 export async function POST(request: Request) {
   try {

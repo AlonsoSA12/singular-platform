@@ -29,7 +29,7 @@ export default async function WorkspaceOkrsPage() {
       subtitle="Projects, Objectives, Key Projects and Key Results"
       title="OKRs"
     >
-      <ClientOkrsMock />
+      <ClientOkrsMock syncProjectInUrl />
     </WorkspacePageFrame>
   );
 }

@@ -1,4 +1,4 @@
-import { createTrustworthinessAssistantReply } from "../../../../src/airtable.js";
+import { createTrustworthinessAssistantReply } from "../../../../src/trustworthiness/assistant-reply.js";
 import {
   badRequestResponse,
   trustworthinessErrorResponse,

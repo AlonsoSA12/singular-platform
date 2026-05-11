@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { FormEvent, ReactNode } from "react";
 import type {
   PortfolioKrHistoryCache,
   PortfolioNarrativeState,
-  PortfolioProjectSummary
+  PortfolioProjectSummary,
+  ProjectOkrData
 } from "@/components/okrs-workspace-data-context";
 import { useOkrsWorkspaceData } from "@/components/okrs-workspace-data-context";
 import type {
@@ -53,6 +55,12 @@ const objectiveStatusOptions: Array<NonNullable<AgileObjective["status"]>> = [
 ];
 const createObjectiveWebhookUrl =
   "https://dev.webhooks.singular-innovation.com/webhook/fbf80a95-1dca-440c-804f-c2ea8dc762ad";
+const createKeyResultWebhookUrl =
+  "https://dev.webhooks.singular-innovation.com/webhook/f9afbac5-a913-4610-9ada-63d698fd3c3a";
+const updateObjectiveWebhookUrl =
+  "https://dev.webhooks.singular-innovation.com/webhook/614971eb-60ec-4acd-83cb-24cbf2dc07b9";
+const updateKeyResultWebhookUrl =
+  "https://dev.webhooks.singular-innovation.com/webhook/2034dfef-2a50-4341-825c-3099aee45847";
 const objectiveSyncPollDelays = [5000, 5000, 10000, 15000];
 
 type ObjectiveSyncStatus = {
@@ -115,6 +123,7 @@ function getObjectiveKeyResults(objective: AgileObjective): AgileKeyResult[] {
     initialValue: null,
     metric: objective.metric,
     progress: objective.status === "Achieved" ? 100 : 0,
+    sourceRecordId: "",
     status: objective.status ?? "Linked",
     targetDate: objective.targetDate,
     targetValue: null,
@@ -173,7 +182,7 @@ function formatPercentValue(value: number | null) {
     return "Not set";
   }
 
-  const percentValue = value <= 1 ? value * 100 : value;
+  const percentValue = getPercentDisplayNumber(value);
 
   return `${percentValue.toLocaleString("es-PE", {
     maximumFractionDigits: 2,
@@ -383,6 +392,64 @@ function KeyResultSentimentBadge({
   );
 }
 
+function KeyResultAiReadout({
+  analysis,
+  isLoading
+}: {
+  analysis?: AgileKeyResultSentimentAnalysis;
+  isLoading?: boolean;
+}) {
+  if (isLoading && !analysis) {
+    return (
+      <section className="client-okrs-kr-ai-readout is-loading">
+        <div>
+          <span>AI Readout</span>
+          <strong>Analyzing KR signal</strong>
+        </div>
+        <p>Reading history, progress, and target movement for this Key Result.</p>
+      </section>
+    );
+  }
+
+  if (!analysis) {
+    return (
+      <section className="client-okrs-kr-ai-readout is-empty">
+        <div>
+          <span>AI Readout</span>
+          <strong>Not scored yet</strong>
+        </div>
+        <p>This Key Result needs an available trend signal before the AI readout can be shown.</p>
+      </section>
+    );
+  }
+
+  const meta = getMetricStatusMeta(analysis.metricStatus);
+  const readoutTitle =
+    analysis.metricStatus === "HOT"
+      ? "AI Praise"
+      : analysis.metricStatus === "NEW"
+        ? "Needs more signal"
+        : "Devil's Advocate";
+  const readoutTone =
+    analysis.metricStatus === "HOT"
+      ? "Protect what is working."
+      : analysis.metricStatus === "NEW"
+        ? "Build enough history to judge movement."
+        : "Create urgency around the next move.";
+
+  return (
+    <section className={`client-okrs-kr-ai-readout ${meta.className}`}>
+      <div>
+        <span>{readoutTitle}</span>
+        <strong>{readoutTone}</strong>
+        <small>{meta.label} | {analysis.sentiment} | {analysis.confidence} confidence</small>
+      </div>
+      <p>{analysis.reason}</p>
+      <small>{analysis.recommendedAction}</small>
+    </section>
+  );
+}
+
 function ProjectSentimentPanel({
   analyses,
   error,
@@ -548,16 +615,29 @@ function ProjectSentimentPanel({
   );
 }
 
-function formatPercentInputValue(value: number | null) {
-  if (value === null) return "0.00%";
-  return formatPercentValue(value);
+function normalizePercentDecimalValue(value: number) {
+  // Airtable can still return old whole-percent values like 70 for 70%.
+  return Math.abs(value) > 10 ? value / 100 : value;
+}
+
+function normalizeNullablePercentDecimalValue(value: number | null) {
+  return value === null ? null : normalizePercentDecimalValue(value);
+}
+
+function getPercentDisplayNumber(value: number) {
+  return normalizePercentDecimalValue(value) * 100;
+}
+
+function formatEditablePercentInputValue(value: number | null) {
+  if (value === null) return "";
+  const percentValue = getPercentDisplayNumber(value);
+  return Number.isInteger(percentValue) ? String(percentValue) : String(Number(percentValue.toFixed(2)));
 }
 
 function parsePercentInputValue(value: string) {
   const normalizedValue = value
     .replace(/%/g, "")
     .replace(/\s/g, "")
-    .replace(/\./g, "")
     .replace(",", ".");
   const parsedValue = Number.parseFloat(normalizedValue);
   if (!Number.isFinite(parsedValue)) return null;
@@ -651,6 +731,167 @@ function findSyncedObjective(
 
     return title === expectedTitle && (!expectedTargetDate || targetDate === expectedTargetDate);
   }) ?? null;
+}
+
+function getObjectiveNumber(objective: AgileObjective) {
+  if (objective.no !== null) {
+    return objective.no;
+  }
+
+  const match = objective.name.match(/^#(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function buildObjectiveUpdatePayload({
+  objective,
+  project
+}: {
+  objective: AgileObjective;
+  project: AgileProject | null;
+}) {
+  const sourceObjectiveId = objective.recordId.trim();
+  const sourceProjectId = project?.sourceRecordId?.trim() || objective.projectIds[0] || "";
+  const targetDate = objective.targetDate.trim();
+
+  return {
+    action: "updateObjective",
+    executionMode: "production",
+    foundationProjectId: objective.projectIds[0] ?? "",
+    project: {
+      foundationRecordId: objective.projectIds[0] ?? "",
+      name: project?.name ?? "",
+      sourceRecordId: sourceProjectId
+    },
+    projectId: sourceProjectId,
+    objective: {
+      aiSuggestedKeyResults: objective.aiSuggestedKeyResults.trim(),
+      description: objective.description.trim(),
+      explanation: objective.explanation.trim(),
+      foundationRecordId: objective.id,
+      goal: getObjectiveTitle(objective).trim(),
+      id: sourceObjectiveId,
+      metric: objective.metric.trim(),
+      number: getObjectiveNumber(objective),
+      priority: objective.priority.trim(),
+      quarter: objective.quarter.trim(),
+      sourceRecordId: sourceObjectiveId,
+      status: objective.status ?? "Pending Review",
+      targetDate,
+      type: objective.type.trim()
+    },
+    webhookUrl: updateObjectiveWebhookUrl
+  };
+}
+
+function formatKeyResultWebhookValue(value: string) {
+  return value.replace("%", "").trim();
+}
+
+function buildKeyResultCreatePayload({
+  form,
+  objective,
+  project,
+  projectId,
+  projectName
+}: {
+  form: Omit<CreateAgileKeyResultInput, "currentValue" | "initialValue" | "targetValue"> & {
+    currentValue: string;
+    initialValue: string;
+    targetValue: string;
+  };
+  objective: AgileObjective;
+  project: AgileProject | null;
+  projectId: string;
+  projectName: string;
+}) {
+  const sourceProjectId = project?.sourceRecordId?.trim() ?? "";
+  const sourceObjectiveId = objective.recordId.trim();
+  const createdBy = project?.collaborator.email?.trim() || "jorgec@singularagency.co";
+  const keyResult = {
+    "Created By": createdBy,
+    "Current Value": formatKeyResultWebhookValue(form.currentValue),
+    "Explanation": form.explanation?.trim() ?? "",
+    "Initial Value": formatKeyResultWebhookValue(form.initialValue),
+    "Key Result": form.keyResult.trim(),
+    "Metric": form.metric?.trim() ?? "",
+    "Objetive": sourceObjectiveId,
+    "Project": sourceProjectId,
+    "Status": form.status,
+    "Target Date": form.targetDate?.trim() ?? "",
+    "Target Value": formatKeyResultWebhookValue(form.targetValue)
+  };
+
+  return {
+    action: "createKeyResults",
+    executionMode: "production",
+    foundationProjectId: projectId,
+    keyResults: [keyResult],
+    objective: {
+      foundationRecordId: objective.id,
+      name: getObjectiveTitle(objective),
+      sourceRecordId: sourceObjectiveId
+    },
+    objectiveId: sourceObjectiveId,
+    project: {
+      foundationRecordId: projectId,
+      name: project?.name ?? projectName,
+      sourceRecordId: sourceProjectId
+    },
+    projectId: sourceProjectId,
+    webhookUrl: createKeyResultWebhookUrl
+  };
+}
+
+function formatKeyResultNumberValue(value: number | null) {
+  return value === null ? "" : String(normalizePercentDecimalValue(value));
+}
+
+function buildKeyResultUpdatePayload({
+  keyResult,
+  objective,
+  project
+}: {
+  keyResult: AgileKeyResult;
+  objective: AgileObjective;
+  project: AgileProject | null;
+}) {
+  const sourceProjectId = project?.sourceRecordId?.trim() ?? "";
+  const sourceObjectiveId = objective.recordId.trim();
+  const sourceKeyResultId = keyResult.sourceRecordId.trim();
+
+  return {
+    action: "updateKeyResult",
+    executionMode: "production",
+    keyResult: {
+      "Current Value": formatKeyResultNumberValue(keyResult.currentValue),
+      "Explanation": keyResult.explanation.trim(),
+      "Initial Value": formatKeyResultNumberValue(keyResult.initialValue),
+      "Key Result": keyResult.title.trim(),
+      "Metric": keyResult.metric.trim(),
+      "Objetive": sourceObjectiveId,
+      "Project": sourceProjectId,
+      "Status": keyResult.status.trim(),
+      "Target Date": keyResult.targetDate.trim(),
+      "Target Value": formatKeyResultNumberValue(keyResult.targetValue),
+      foundationRecordId: keyResult.id,
+      id: sourceKeyResultId,
+      sourceRecordId: sourceKeyResultId
+    },
+    keyResultId: sourceKeyResultId,
+    objective: {
+      foundationRecordId: objective.id,
+      name: getObjectiveTitle(objective),
+      sourceRecordId: sourceObjectiveId
+    },
+    objectiveId: sourceObjectiveId,
+    project: {
+      foundationRecordId: objective.projectIds[0] ?? "",
+      name: project?.name ?? "",
+      sourceRecordId: sourceProjectId
+    },
+    projectId: sourceProjectId,
+    webhookUrl: updateKeyResultWebhookUrl
+  };
 }
 
 function wait(milliseconds: number) {
@@ -768,18 +1009,6 @@ function EditableMetricItem({
   );
 }
 
-function percentDigitsFromValue(value: number | null) {
-  if (value === null) return "";
-  const percentValue = value <= 1 ? value * 100 : value;
-  const centsValue = Math.max(0, Math.round(percentValue * 100));
-  return centsValue === 0 ? "" : String(centsValue);
-}
-
-function percentValueFromDigits(digits: string) {
-  if (!digits) return 0;
-  return Number(digits) / 10000;
-}
-
 function EditablePercentItem({
   isEditing,
   label,
@@ -791,56 +1020,30 @@ function EditablePercentItem({
   onChange: (value: number | null) => void;
   value: number | null;
 }) {
-  const displayValue = isEditing ? formatPercentInputValue(value) : formatPercentValue(value);
+  const [inputValue, setInputValue] = useState(formatEditablePercentInputValue(value));
+  const displayValue = formatPercentValue(value);
 
-  function handleDigitInput(digit: string, shouldReset: boolean) {
-    const currentDigits = shouldReset ? "" : percentDigitsFromValue(value);
-    const nextDigits = `${currentDigits}${digit}`.replace(/^0+(?=\d)/, "").slice(-8);
-    onChange(percentValueFromDigits(nextDigits));
-  }
-
-  function handleDeleteLastDigit() {
-    const currentDigits = percentDigitsFromValue(value);
-    const nextDigits = currentDigits.slice(0, -1);
-    onChange(nextDigits ? percentValueFromDigits(nextDigits) : 0);
-  }
+  useEffect(() => {
+    if (isEditing) {
+      setInputValue(formatEditablePercentInputValue(value));
+    }
+  }, [isEditing]);
 
   return (
     <label className={`client-okrs-meta-item${isEditing ? " is-editing" : ""}`}>
       <span>{label}</span>
       {isEditing ? (
         <input
-          inputMode="numeric"
-          onChange={() => undefined}
+          inputMode="decimal"
+          onBlur={() => setInputValue(formatEditablePercentInputValue(value))}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setInputValue(nextValue);
+            onChange(parsePercentInputValue(nextValue));
+          }}
           onFocus={(event) => event.currentTarget.select()}
-          onKeyDown={(event) => {
-            if (/^\d$/.test(event.key)) {
-              event.preventDefault();
-              handleDigitInput(
-                event.key,
-                event.currentTarget.selectionStart === 0 &&
-                  event.currentTarget.selectionEnd === event.currentTarget.value.length
-              );
-              return;
-            }
-
-            if (event.key === "Backspace") {
-              event.preventDefault();
-              handleDeleteLastDigit();
-              return;
-            }
-
-            if (event.key === "Delete") {
-              event.preventDefault();
-              onChange(0);
-            }
-          }}
-          onPaste={(event) => {
-            event.preventDefault();
-            const pastedDigits = event.clipboardData.getData("text").replace(/\D/g, "").slice(-8);
-            onChange(pastedDigits ? percentValueFromDigits(pastedDigits) : 0);
-          }}
-          value={displayValue}
+          placeholder="0"
+          value={inputValue}
         />
       ) : (
         <strong>{displayValue}</strong>
@@ -1482,16 +1685,13 @@ function NewOkrRecordModal({
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isObjectiveIdeaModalOpen, setIsObjectiveIdeaModalOpen] = useState(false);
+  const [isKeyResultIdeaModalOpen, setIsKeyResultIdeaModalOpen] = useState(false);
   const [objectiveIdea, setObjectiveIdea] = useState("");
   const [objectiveIdeaError, setObjectiveIdeaError] = useState<string | null>(null);
+  const [keyResultIdea, setKeyResultIdea] = useState("");
+  const [keyResultIdeaError, setKeyResultIdeaError] = useState<string | null>(null);
   const title =
     type === "objective" ? "New Objective" : type === "key-result" ? "New Key Result" : "New Key Project";
-
-  function parsePercentField(value: string) {
-    if (!value.trim()) return null;
-    const parsedValue = Number(value.replace("%", "").replace(",", ".").trim());
-    return Number.isFinite(parsedValue) ? parsedValue / 100 : null;
-  }
 
   async function handleGenerateObjectiveDraft() {
     setObjectiveIdeaError(null);
@@ -1543,9 +1743,15 @@ function NewOkrRecordModal({
 
     setError(null);
     setGenerationMessage(null);
+    setKeyResultIdeaError(null);
 
     if (!selectedObjective) {
-      setError("Select an Objective first so the IA can generate a coherent Key Result.");
+      setKeyResultIdeaError("Select an Objective first so the IA can generate a coherent Key Result.");
+      return;
+    }
+
+    if (!keyResultIdea.trim()) {
+      setKeyResultIdeaError("Add a Key Result idea before generating with IA.");
       return;
     }
 
@@ -1554,6 +1760,7 @@ function NewOkrRecordModal({
     try {
       const payload = await generateAgileKeyResultDraft({
         existingKeyResults: getObjectiveKeyResults(selectedObjective),
+        idea: keyResultIdea.trim(),
         objective: selectedObjective,
         projectId,
         projectName
@@ -1571,9 +1778,10 @@ function NewOkrRecordModal({
         targetDate: draft.targetDate,
         targetValue: formatDraftNumberInput(draft.targetValue)
       }));
+      setIsKeyResultIdeaModalOpen(false);
       setGenerationMessage(`Draft generated with ${payload.model}. Review before creating.`);
     } catch (draftError) {
-      setError(draftError instanceof Error ? draftError.message : "No fue posible generar el Key Result con IA.");
+      setKeyResultIdeaError(draftError instanceof Error ? draftError.message : "No fue posible generar el Key Result con IA.");
     } finally {
       setIsGeneratingDraft(false);
     }
@@ -1653,28 +1861,41 @@ function NewOkrRecordModal({
           throw new Error("Key Result is required.");
         }
 
-        const response = await fetch("/api/okrs/key-results", {
-          body: JSON.stringify({
-            ...keyResultForm,
-            currentValue: parsePercentField(keyResultForm.currentValue),
-            initialValue: parsePercentField(keyResultForm.initialValue),
-            projectId,
-            targetValue: parsePercentField(keyResultForm.targetValue)
-          }),
+        const selectedObjective = objectives.find((objective) => objective.id === keyResultForm.objectiveId);
+        if (!selectedObjective) {
+          throw new Error("Objective is required.");
+        }
+
+        if (!project?.sourceRecordId?.trim()) {
+          throw new Error("Este Project no tiene sourceRecordId configurado para crear KRs en Singular AGILE.");
+        }
+
+        if (!selectedObjective.recordId.trim()) {
+          throw new Error("Este Objective no tiene sourceRecordId / record_id configurado para crear KRs en Singular AGILE.");
+        }
+
+        const response = await fetch(createKeyResultWebhookUrl, {
+          body: JSON.stringify(
+            buildKeyResultCreatePayload({
+              form: keyResultForm,
+              objective: selectedObjective,
+              project,
+              projectId,
+              projectName
+            })
+          ),
           headers: {
             "Content-Type": "application/json"
           },
           method: "POST"
         });
-        const payload = (await response.json()) as
-          | { keyResult: AgileKeyResult; objectiveId: string; ok: true }
-          | { message?: string; ok?: false };
+        const payload = await readWebhookResponse(response);
 
-        if (!response.ok || !("ok" in payload && payload.ok)) {
-          throw new Error((payload as { message?: string }).message ?? "No fue posible crear el Key Result.");
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.message ?? "No fue posible crear el Key Result en N8n.");
         }
 
-        await onCreated({ objectiveId: payload.objectiveId, type });
+        await onCreated({ objectiveId: selectedObjective.id, type });
         return;
       }
 
@@ -1729,7 +1950,7 @@ function NewOkrRecordModal({
               <p>
                 {type === "objective"
                   ? "Open a guided prompt to add your intent, then generate an Objective and 3 measurable Key Results."
-                  : "Generate a measurable Key Result from the selected Objective and project context."}
+                  : "Open a guided prompt to add your intent, then generate a measurable Key Result from the selected Objective."}
               </p>
             </div>
             <button
@@ -1737,7 +1958,10 @@ function NewOkrRecordModal({
               onClick={type === "objective" ? () => {
                 setObjectiveIdeaError(null);
                 setIsObjectiveIdeaModalOpen(true);
-              } : handleGenerateKeyResultDraft}
+              } : () => {
+                setKeyResultIdeaError(null);
+                setIsKeyResultIdeaModalOpen(true);
+              }}
               type="button"
             >
               {isGeneratingDraft ? "Thinking..." : "Generate with IA"}
@@ -1970,6 +2194,75 @@ function NewOkrRecordModal({
           </section>
         </div>
       ) : null}
+      {type === "key-result" && isKeyResultIdeaModalOpen ? (
+        <div className="client-okrs-idea-modal-layer" role="presentation">
+          <button
+            aria-label="Close Key Result idea prompt"
+            className="client-okrs-idea-modal-backdrop"
+            disabled={isGeneratingDraft}
+            onClick={() => setIsKeyResultIdeaModalOpen(false)}
+            type="button"
+          />
+          <section
+            aria-labelledby="client-okrs-key-result-idea-title"
+            aria-modal="true"
+            className="client-okrs-idea-modal"
+            role="dialog"
+          >
+            <div className="client-okrs-idea-modal-head">
+              <div>
+                <span className="client-okrs-section-label">Generate Key Result</span>
+                <h3 id="client-okrs-key-result-idea-title">Key Result Idea</h3>
+              </div>
+              <button
+                aria-label="Close Key Result idea prompt"
+                className="client-okrs-idea-modal-close"
+                disabled={isGeneratingDraft}
+                onClick={() => setIsKeyResultIdeaModalOpen(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <p className="client-okrs-idea-modal-copy">
+              Add the result you want to measure. IA will combine it with the selected Objective, project context, and
+              existing Key Results to draft one measurable KR.
+            </p>
+            <label className="client-okrs-idea-field">
+              <span>Idea</span>
+              <textarea
+                autoFocus
+                onChange={(event) => {
+                  setKeyResultIdea(event.target.value);
+                  setKeyResultIdeaError(null);
+                }}
+                placeholder="Example: reduce review time, increase first-pass approval, improve response SLA..."
+                rows={5}
+                value={keyResultIdea}
+              />
+            </label>
+            {keyResultIdeaError ? <p className="client-okrs-idea-error">{keyResultIdeaError}</p> : null}
+            <div className="client-okrs-idea-modal-actions">
+              <button
+                className="client-okrs-create-cancel"
+                disabled={isGeneratingDraft}
+                onClick={() => setIsKeyResultIdeaModalOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="client-okrs-create-submit"
+                disabled={isGeneratingDraft || !keyResultIdea.trim()}
+                onClick={handleGenerateKeyResultDraft}
+                type="button"
+              >
+                {isGeneratingDraft ? "Generating..." : "Generate draft"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2038,13 +2331,13 @@ function PortfolioTabs({
 
 function AccountSummaryView({
   narrative,
-  onSelectProject,
+  onOpenProject,
   portfolioSummaries,
   projects,
   selectedProjectId
 }: {
   narrative: PortfolioNarrativeState;
-  onSelectProject: (projectId: string) => void;
+  onOpenProject: (projectId: string) => void;
   portfolioSummaries: Record<string, PortfolioProjectSummary>;
   projects: AgileProject[];
   selectedProjectId: string;
@@ -2126,7 +2419,7 @@ function AccountSummaryView({
             <button
               className={`client-okrs-account-row${isSelected ? " is-selected" : ""}`}
               key={project.id}
-              onClick={() => onSelectProject(project.id)}
+              onClick={() => onOpenProject(project.id)}
               type="button"
             >
               <div className="client-okrs-account-row-main">
@@ -2191,6 +2484,97 @@ function AccountSummaryView({
         })}
       </div>
     </section>
+  );
+}
+
+function PortfolioProjectOverviewPanel({
+  error,
+  isLoading,
+  onClose,
+  onOpenObjective,
+  project,
+  projectData,
+  summary
+}: {
+  error: string | null;
+  isLoading: boolean;
+  onClose: () => void;
+  onOpenObjective: (objective: AgileObjective, index: number) => void;
+  project: AgileProject;
+  projectData?: ProjectOkrData;
+  summary?: PortfolioProjectSummary;
+}) {
+  const objectives = projectData?.objectives ?? [];
+  const signalCounts = summary?.signalCounts ?? { bleeding: 0, cold: 0, hot: 0, new: 0 };
+
+  return (
+    <div className="client-okrs-modal-layer" role="presentation">
+      <button
+        aria-label="Close Project overview"
+        className="client-okrs-modal-backdrop"
+        onClick={onClose}
+        type="button"
+      />
+      <aside aria-modal="true" className="client-okrs-modal client-okrs-side-sheet" role="dialog">
+        <div className="client-okrs-sheet-toolbar">
+          <div>
+            <span className="client-okrs-section-label">Project Overview</span>
+            <h2 className="client-okrs-project-overview-title">{project.name}</h2>
+          </div>
+          <button aria-label="Close Project overview" className="client-okrs-sheet-close" onClick={onClose} type="button">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="client-okrs-detail-stack">
+          <section className="client-okrs-detail-card">
+            <div className="client-okrs-progress-head">
+              <span>Project Score</span>
+              <div>
+                <strong>{summary?.score === null || summary?.score === undefined ? "N/A" : `${summary.score}%`}</strong>
+                <p>{summary?.objectiveCount ?? objectives.length} objectives</p>
+              </div>
+            </div>
+            <div className="client-okrs-account-row-signals" aria-label={`${project.name} Key Result signal counts`}>
+              <span className="is-hot">HOT <strong>{signalCounts.hot}</strong></span>
+              <span className="is-bleeding">BLEEDING <strong>{signalCounts.bleeding}</strong></span>
+              <span className="is-cold">COLD <strong>{signalCounts.cold}</strong></span>
+              <span className="is-new">NEW <strong>{signalCounts.new}</strong></span>
+            </div>
+          </section>
+
+          {isLoading ? (
+            <article className="client-okrs-detail-card">
+              <p>Loading Project overview...</p>
+            </article>
+          ) : error ? (
+            <article className="client-okrs-detail-card">
+              <p className="client-okrs-sentiment-error">{error}</p>
+            </article>
+          ) : objectives.length === 0 ? (
+            <article className="client-okrs-detail-card">
+              <p>No OKRs loaded for this Project yet.</p>
+            </article>
+          ) : (
+            <div className="client-okrs-grid">
+              {objectives.map((objective, index) => (
+                <OkrSummaryCard
+                  healthError={null}
+                  isAnalyzingHealth={false}
+                  key={objective.id}
+                  okr={objective}
+                  okrIndex={index + 1}
+                  onOpen={() => onOpenObjective(objective, index)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -2336,6 +2720,35 @@ function PortfolioKrCard({
         </div>
       )}
     </button>
+  );
+}
+
+function KeyResultInlineHistoryChart({
+  historyState,
+  metricStatus
+}: {
+  historyState?: PortfolioKrHistoryCache[string];
+  metricStatus?: AgileKeyResultSentimentAnalysis["metricStatus"];
+}) {
+  return (
+    <div className="client-okrs-kr-inline-history">
+      <div className="client-okrs-detail-card-head">
+        <span>History Trend</span>
+      </div>
+      {historyState?.status === "ready" ? (
+        <PortfolioMiniHistoryChart history={historyState.history} metricStatus={metricStatus} />
+      ) : historyState?.status === "error" ? (
+        <div className="client-okrs-portfolio-kr-chart-empty is-error">{historyState.error ?? "History failed"}</div>
+      ) : (
+        <div className="client-okrs-portfolio-kr-chart-empty">
+          <span className="client-okrs-account-loading-dots" aria-label="Loading history">
+            <i />
+            <i />
+            <i />
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2566,6 +2979,7 @@ function OkrDetailModal({
   okr,
   okrIndex,
   onClose,
+  onObjectiveUpdated,
   projects
 }: {
   initialTab?: OkrDetailTab;
@@ -2575,8 +2989,10 @@ function OkrDetailModal({
   okr: AgileObjective;
   okrIndex: number;
   onClose: () => void;
+  onObjectiveUpdated: (objective: AgileObjective) => void;
   projects: AgileProject[];
 }) {
+  const { ensureKeyResultHistoryBulk } = useOkrsWorkspaceData();
   const [activeTab, setActiveTab] = useState<OkrDetailTab>(initialTab);
   const keyResults = getObjectiveKeyResults(okr);
   const [editableObjective, setEditableObjective] = useState<AgileObjective>(okr);
@@ -2587,15 +3003,22 @@ function OkrDetailModal({
   const [activeHistoryKeyResult, setActiveHistoryKeyResult] = useState<AgileKeyResult | null>(null);
   const [activeKeyProject, setActiveKeyProject] = useState<AgileKeyProject | null>(null);
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
+  const [isObjectiveUpdateConfirmOpen, setIsObjectiveUpdateConfirmOpen] = useState(false);
+  const [pendingKeyResultUpdateId, setPendingKeyResultUpdateId] = useState<string | null>(null);
   const [keyResultSentiments, setKeyResultSentiments] = useState<Record<string, AgileKeyResultSentimentAnalysis>>(() =>
     Object.fromEntries(initialKeyResultSentiments.map((analysis) => [analysis.keyResultId, analysis]))
   );
   const [isAnalyzingKeyResultSentiments, setIsAnalyzingKeyResultSentiments] = useState(false);
   const [keyResultSentimentError, setKeyResultSentimentError] = useState<string | null>(null);
+  const [isUpdatingObjective, setIsUpdatingObjective] = useState(false);
+  const [objectiveUpdateError, setObjectiveUpdateError] = useState<string | null>(null);
+  const [isUpdatingKeyResult, setIsUpdatingKeyResult] = useState(false);
+  const [keyResultUpdateError, setKeyResultUpdateError] = useState<string | null>(null);
   const completedKrs = keyResults.filter(isKeyResultComplete).length;
   const progress = computeObjectiveScore(editableObjective);
   const suggestionLines = splitRichTextLines(editableObjective.aiSuggestedKeyResults);
   const quarter = getObjectiveQuarter(editableObjective);
+  const keyResultHistorySignature = editableKeyResults.map((keyResult) => keyResult.id).join("|");
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -2607,11 +3030,26 @@ function OkrDetailModal({
     setActiveHistoryKeyResult(null);
     setActiveKeyProject(null);
     setIsCloseConfirmOpen(false);
-    setKeyResultSentiments(
-      Object.fromEntries(initialKeyResultSentiments.map((analysis) => [analysis.keyResultId, analysis]))
-    );
+    setIsObjectiveUpdateConfirmOpen(false);
+    setPendingKeyResultUpdateId(null);
+    setKeyResultSentiments({});
     setKeyResultSentimentError(null);
-  }, [initialKeyResultSentiments, initialTab, okr.id]);
+    setObjectiveUpdateError(null);
+    setIsUpdatingObjective(false);
+    setKeyResultUpdateError(null);
+    setIsUpdatingKeyResult(false);
+  }, [initialTab, okr.id]);
+
+  useEffect(() => {
+    if (initialKeyResultSentiments.length === 0) {
+      return;
+    }
+
+    setKeyResultSentiments((current) => ({
+      ...current,
+      ...Object.fromEntries(initialKeyResultSentiments.map((analysis) => [analysis.keyResultId, analysis]))
+    }));
+  }, [initialKeyResultSentiments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -2667,6 +3105,22 @@ function OkrDetailModal({
     setActiveHistoryKeyResult(null);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== "key-results" || editableKeyResults.length === 0) {
+      return;
+    }
+
+    const missingHistoryIds = editableKeyResults
+      .map((keyResult) => keyResult.id)
+      .filter((keyResultId) => !keyResultHistoryCache?.[keyResultId]);
+
+    if (missingHistoryIds.length === 0) {
+      return;
+    }
+
+    void ensureKeyResultHistoryBulk(missingHistoryIds);
+  }, [activeTab, ensureKeyResultHistoryBulk, keyResultHistoryCache, keyResultHistorySignature]);
+
   function updateEditableKeyResult(keyResultId: string, changes: Partial<AgileKeyResult>) {
     const shouldRecalculateProgress =
       "initialValue" in changes || "currentValue" in changes || "targetValue" in changes;
@@ -2681,6 +3135,13 @@ function OkrDetailModal({
           ...keyResult,
           ...changes
         };
+
+        if (shouldRecalculateProgress) {
+          nextKeyResult.initialValue = normalizeNullablePercentDecimalValue(nextKeyResult.initialValue);
+          nextKeyResult.currentValue = normalizeNullablePercentDecimalValue(nextKeyResult.currentValue);
+          nextKeyResult.targetValue = normalizeNullablePercentDecimalValue(nextKeyResult.targetValue);
+        }
+
         const recalculatedProgress = shouldRecalculateProgress
           ? calculateKeyResultProgress(
               nextKeyResult.initialValue,
@@ -2702,6 +3163,128 @@ function OkrDetailModal({
       ...currentObjective,
       ...changes
     }));
+  }
+
+  function discardEditableKeyResultChanges(keyResultId: string) {
+    const originalKeyResult = keyResults.find((candidate) => candidate.id === keyResultId);
+
+    if (originalKeyResult) {
+      setEditableKeyResults((currentKeyResults) =>
+        currentKeyResults.map((keyResult) =>
+          keyResult.id === keyResultId ? originalKeyResult : keyResult
+        )
+      );
+    }
+
+    setEditingKeyResultId(null);
+    setActiveMetricEditorId(null);
+    setPendingKeyResultUpdateId(null);
+    setKeyResultUpdateError(null);
+  }
+
+  function discardEditableObjectiveChanges() {
+    setEditableObjective(okr);
+    setIsEditingObjective(false);
+    setIsObjectiveUpdateConfirmOpen(false);
+    setObjectiveUpdateError(null);
+  }
+
+  async function saveEditableObjective() {
+    const project = projects.find((candidate) => candidate.id === editableObjective.projectIds[0]) ?? null;
+    const sourceObjectiveId = editableObjective.recordId.trim();
+
+    if (!sourceObjectiveId) {
+      throw new Error("Este Objective no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.");
+    }
+
+    setIsUpdatingObjective(true);
+    setObjectiveUpdateError(null);
+
+    try {
+      const response = await fetch(updateObjectiveWebhookUrl, {
+        body: JSON.stringify(buildObjectiveUpdatePayload({ objective: editableObjective, project })),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const payload = await readWebhookResponse(response);
+
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message ?? "No fue posible actualizar el Objective en N8n.");
+      }
+
+      setIsEditingObjective(false);
+      setIsObjectiveUpdateConfirmOpen(false);
+      onObjectiveUpdated(editableObjective);
+    } catch (error) {
+      setObjectiveUpdateError(
+        error instanceof Error ? error.message : "No fue posible actualizar el Objective."
+      );
+    } finally {
+      setIsUpdatingObjective(false);
+    }
+  }
+
+  async function saveEditableKeyResult(keyResultId: string) {
+    const keyResult = editableKeyResults.find((candidate) => candidate.id === keyResultId);
+    const project = projects.find((candidate) => candidate.id === editableObjective.projectIds[0]) ?? null;
+
+    if (!keyResult) {
+      setPendingKeyResultUpdateId(null);
+      return;
+    }
+
+    if (!project?.sourceRecordId?.trim()) {
+      setKeyResultUpdateError("Este Project no tiene sourceRecordId configurado para actualizar KRs en Singular AGILE.");
+      setPendingKeyResultUpdateId(null);
+      return;
+    }
+
+    if (!editableObjective.recordId.trim()) {
+      setKeyResultUpdateError("Este Objective no tiene sourceRecordId / record_id configurado para actualizar KRs en Singular AGILE.");
+      setPendingKeyResultUpdateId(null);
+      return;
+    }
+
+    if (!keyResult.sourceRecordId.trim()) {
+      setKeyResultUpdateError("Este Key Result no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.");
+      setPendingKeyResultUpdateId(null);
+      return;
+    }
+
+    setIsUpdatingKeyResult(true);
+    setKeyResultUpdateError(null);
+
+    try {
+      const response = await fetch(updateKeyResultWebhookUrl, {
+        body: JSON.stringify(buildKeyResultUpdatePayload({ keyResult, objective: editableObjective, project })),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const payload = await readWebhookResponse(response);
+
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message ?? "No fue posible actualizar el Key Result en N8n.");
+      }
+
+      const nextObjective = {
+        ...editableObjective,
+        keyResults: editableKeyResults
+      };
+      setEditableObjective(nextObjective);
+      setEditingKeyResultId(null);
+      setPendingKeyResultUpdateId(null);
+      onObjectiveUpdated(nextObjective);
+    } catch (error) {
+      setKeyResultUpdateError(
+        error instanceof Error ? error.message : "No fue posible actualizar el Key Result."
+      );
+    } finally {
+      setIsUpdatingKeyResult(false);
+    }
   }
 
   function getProjectNames(projectIds: string[]) {
@@ -2757,9 +3340,18 @@ function OkrDetailModal({
               <div className="client-okrs-objective-actions">
                 <span className="client-okrs-section-label">Objective</span>
                 <button
-                  aria-label={isEditingObjective ? "Finish editing Objective" : "Edit Objective"}
+                  aria-label={isEditingObjective ? "Save Objective" : "Edit Objective"}
                   className={`client-okrs-kr-edit-button${isEditingObjective ? " is-editing" : ""}`}
-                  onClick={() => setIsEditingObjective((current) => !current)}
+                  disabled={isUpdatingObjective}
+                  onClick={() => {
+                    if (!isEditingObjective) {
+                      setObjectiveUpdateError(null);
+                      setIsEditingObjective(true);
+                      return;
+                    }
+
+                    setIsObjectiveUpdateConfirmOpen(true);
+                  }}
                   type="button"
                 >
                   {isEditingObjective ? (
@@ -2774,6 +3366,7 @@ function OkrDetailModal({
                   )}
                 </button>
               </div>
+              {objectiveUpdateError ? <p className="client-okrs-sentiment-error">{objectiveUpdateError}</p> : null}
               <div className="client-okrs-detail-heading-row">
                 {isEditingObjective ? (
                   <textarea
@@ -2798,12 +3391,7 @@ function OkrDetailModal({
                 <p>{getObjectiveDescription(editableObjective)}</p>
               )}
               <div className="client-okrs-meta-grid">
-                <EditableMetaItem
-                  isEditing={isEditingObjective}
-                  label="Quarter"
-                  onChange={(value) => updateEditableObjective({ quarter: value })}
-                  value={editableObjective.quarter}
-                />
+                <DetailMetaItem label="Quarter" value={editableObjective.quarter} />
                 <EditableObjectiveStatusItem
                   isEditing={isEditingObjective}
                   onChange={(value) => updateEditableObjective({ status: value })}
@@ -2946,6 +3534,9 @@ function OkrDetailModal({
             {keyResultSentimentError ? (
               <p className="client-okrs-sentiment-error">{keyResultSentimentError}</p>
             ) : null}
+            {keyResultUpdateError ? (
+              <p className="client-okrs-sentiment-error">{keyResultUpdateError}</p>
+            ) : null}
             {editableKeyResults.length > 0 ? (
               <article className="client-okrs-kr-detail-card">
                 {editableKeyResults.map((keyResult, keyResultIndex) => {
@@ -3023,8 +3614,14 @@ function OkrDetailModal({
                           <button
                             aria-label={isEditingKeyResult ? "Finish editing Key Result" : "Edit Key Result"}
                             className={`client-okrs-kr-edit-button${isEditingKeyResult ? " is-editing" : ""}`}
+                            disabled={isUpdatingKeyResult}
                             onClick={() => {
-                              setEditingKeyResultId(isEditingKeyResult ? null : keyResult.id);
+                              setKeyResultUpdateError(null);
+                              if (isEditingKeyResult) {
+                                setPendingKeyResultUpdateId(keyResult.id);
+                              } else {
+                                setEditingKeyResultId(keyResult.id);
+                              }
                               setActiveMetricEditorId(null);
                             }}
                             type="button"
@@ -3043,46 +3640,56 @@ function OkrDetailModal({
                         </div>
                       </div>
                     </div>
-                    <div className="client-okrs-kr-metric-grid">
-                      <EditableMetricItem
-                        isEditing={isEditingKeyResult}
-                        isOpen={activeMetricEditorId === keyResult.id}
-                        onChange={(value) => updateEditableKeyResult(keyResult.id, { metric: value })}
-                        onClose={() => setActiveMetricEditorId(null)}
-                        onOpen={() => setActiveMetricEditorId(keyResult.id)}
-                        value={keyResult.metric || okr.metric}
+                    <div className="client-okrs-kr-detail-content">
+                      <KeyResultInlineHistoryChart
+                        historyState={keyResultHistoryCache?.[keyResult.id]}
+                        metricStatus={sentimentAnalysis?.metricStatus}
                       />
-                      <EditableStatusItem
-                        isEditing={isEditingKeyResult}
-                        onChange={(value) => updateEditableKeyResult(keyResult.id, { status: value })}
-                        value={keyResult.status}
-                      />
-                      <EditableMetaItem
-                        isEditing={isEditingKeyResult}
-                        label="Target Date"
-                        onChange={(value) => updateEditableKeyResult(keyResult.id, { targetDate: value })}
-                        type="date"
-                        value={keyResult.targetDate || okr.targetDate}
-                      />
-                      <EditablePercentItem
-                        isEditing={isEditingKeyResult}
-                        label="Initial"
-                        onChange={(value) => updateEditableKeyResult(keyResult.id, { initialValue: value })}
-                        value={keyResult.initialValue}
-                      />
-                      <EditablePercentItem
-                        isEditing={isEditingKeyResult}
-                        label="Current"
-                        onChange={(value) => updateEditableKeyResult(keyResult.id, { currentValue: value })}
-                        value={keyResult.currentValue}
-                      />
-                      <EditablePercentItem
-                        isEditing={isEditingKeyResult}
-                        label="Target"
-                        onChange={(value) => updateEditableKeyResult(keyResult.id, { targetValue: value })}
-                        value={keyResult.targetValue}
-                      />
+                      <div className="client-okrs-kr-metric-grid">
+                        <EditableMetricItem
+                          isEditing={isEditingKeyResult}
+                          isOpen={activeMetricEditorId === keyResult.id}
+                          onChange={(value) => updateEditableKeyResult(keyResult.id, { metric: value })}
+                          onClose={() => setActiveMetricEditorId(null)}
+                          onOpen={() => setActiveMetricEditorId(keyResult.id)}
+                          value={keyResult.metric || okr.metric}
+                        />
+                        <EditableStatusItem
+                          isEditing={isEditingKeyResult}
+                          onChange={(value) => updateEditableKeyResult(keyResult.id, { status: value })}
+                          value={keyResult.status}
+                        />
+                        <EditableMetaItem
+                          isEditing={isEditingKeyResult}
+                          label="Target Date"
+                          onChange={(value) => updateEditableKeyResult(keyResult.id, { targetDate: value })}
+                          type="date"
+                          value={keyResult.targetDate || okr.targetDate}
+                        />
+                        <EditablePercentItem
+                          isEditing={isEditingKeyResult}
+                          label="Initial"
+                          onChange={(value) => updateEditableKeyResult(keyResult.id, { initialValue: value })}
+                          value={keyResult.initialValue}
+                        />
+                        <EditablePercentItem
+                          isEditing={isEditingKeyResult}
+                          label="Current"
+                          onChange={(value) => updateEditableKeyResult(keyResult.id, { currentValue: value })}
+                          value={keyResult.currentValue}
+                        />
+                        <EditablePercentItem
+                          isEditing={isEditingKeyResult}
+                          label="Target"
+                          onChange={(value) => updateEditableKeyResult(keyResult.id, { targetValue: value })}
+                          value={keyResult.targetValue}
+                        />
+                      </div>
                     </div>
+                    <KeyResultAiReadout
+                      analysis={sentimentAnalysis}
+                      isLoading={isAnalyzingKeyResultSentiments}
+                    />
                     {isEditingKeyResult ? (
                       <textarea
                         aria-label="Key Result explanation"
@@ -3090,8 +3697,6 @@ function OkrDetailModal({
                         onChange={(event) => updateEditableKeyResult(keyResult.id, { explanation: event.target.value })}
                         value={keyResult.explanation}
                       />
-                    ) : keyResult.explanation ? (
-                      <p className="client-okrs-kr-explanation">{keyResult.explanation}</p>
                     ) : null}
                   </div>
                 )})}
@@ -3291,18 +3896,90 @@ function OkrDetailModal({
           </section>
         </div>
       ) : null}
+      {isObjectiveUpdateConfirmOpen ? (
+        <div aria-modal="true" className="client-okrs-app-confirm-layer" role="dialog">
+          <section className="client-okrs-app-confirm-card">
+            <p>Vas a actualizar este Objective en Singular AGILE. ¿Quieres continuar?</p>
+            <div className="client-okrs-app-confirm-actions has-three-actions">
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isUpdatingObjective}
+                onClick={() => setIsObjectiveUpdateConfirmOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isUpdatingObjective}
+                onClick={discardEditableObjectiveChanges}
+                type="button"
+              >
+                Discard
+              </button>
+              <button
+                className="client-okrs-app-confirm-primary"
+                disabled={isUpdatingObjective}
+                onClick={() => void saveEditableObjective()}
+                type="button"
+              >
+                {isUpdatingObjective ? "Updating..." : "OK"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {pendingKeyResultUpdateId ? (
+        <div aria-modal="true" className="client-okrs-app-confirm-layer" role="dialog">
+          <section className="client-okrs-app-confirm-card">
+            <p>Vas a actualizar este Key Result en Singular AGILE. ¿Quieres continuar?</p>
+            <div className="client-okrs-app-confirm-actions has-three-actions">
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isUpdatingKeyResult}
+                onClick={() => setPendingKeyResultUpdateId(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isUpdatingKeyResult}
+                onClick={() => discardEditableKeyResultChanges(pendingKeyResultUpdateId)}
+                type="button"
+              >
+                Discard
+              </button>
+              <button
+                className="client-okrs-app-confirm-primary"
+                disabled={isUpdatingKeyResult}
+                onClick={() => void saveEditableKeyResult(pendingKeyResultUpdateId)}
+                type="button"
+              >
+                {isUpdatingKeyResult ? "Updating..." : "OK"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export function ClientOkrsMock({
+  initialProjectId = "",
   initialMainTab = "okrs",
-  showMainTabs = true
+  showMainTabs = true,
+  syncProjectInUrl = false
 }: {
+  initialProjectId?: string;
   initialMainTab?: MainOkrTab;
   showMainTabs?: boolean;
+  syncProjectInUrl?: boolean;
 }) {
+  const router = useRouter();
   const {
+    cancelPortfolioSummaries,
     ensureKeyResultHistoryBulk,
     ensurePortfolioNarrative,
     ensurePortfolioSummaries,
@@ -3321,7 +3998,7 @@ export function ClientOkrsMock({
   } = useOkrsWorkspaceData();
   const [okrs, setOkrs] = useState<AgileObjective[]>([]);
   const [keyProjects, setKeyProjects] = useState<AgileKeyProject[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const [projectKeyResultAnalyses, setProjectKeyResultAnalyses] = useState<AgileKeyResultSentimentAnalysis[]>([]);
   const [portfolioNarrative, setPortfolioNarrative] = useState<PortfolioNarrativeState>({
     analysis: null,
@@ -3343,6 +4020,9 @@ export function ClientOkrsMock({
   const [activeOkr, setActiveOkr] = useState<AgileObjective | null>(null);
   const [activeOkrIndex, setActiveOkrIndex] = useState(1);
   const [activeOkrInitialTab, setActiveOkrInitialTab] = useState<OkrDetailTab>("overview");
+  const [activePortfolioProjectId, setActivePortfolioProjectId] = useState<string | null>(null);
+  const [isLoadingPortfolioProject, setIsLoadingPortfolioProject] = useState(false);
+  const [portfolioProjectError, setPortfolioProjectError] = useState<string | null>(null);
   const [activeOkrReturnContext, setActiveOkrReturnContext] = useState<{
     mainTab: MainOkrTab;
     portfolioTab: PortfolioTab;
@@ -3353,11 +4033,23 @@ export function ClientOkrsMock({
   const [newRecordType, setNewRecordType] = useState<NewOkrRecordType | null>(null);
   const [objectiveSyncStatus, setObjectiveSyncStatus] = useState<ObjectiveSyncStatus | null>(null);
   const objectiveSyncPollRunRef = useRef(0);
+  const initialProjectIdRef = useRef(initialProjectId);
   const isLoadingProjects = projectsStatus === "idle" || projectsStatus === "loading";
 
   useEffect(() => {
     void ensureProjects().catch(() => undefined);
   }, [ensureProjects]);
+
+  useEffect(() => {
+    if (!syncProjectInUrl || activeMainTab === "portfolio-analysis") {
+      return;
+    }
+
+    if (initialProjectIdRef.current !== initialProjectId) {
+      initialProjectIdRef.current = initialProjectId;
+      setSelectedProjectId(initialProjectId);
+    }
+  }, [activeMainTab, initialProjectId, syncProjectInUrl]);
 
   const selectedProjectCachedData = selectedProjectId ? projectDataCache[selectedProjectId] : undefined;
 
@@ -3427,11 +4119,12 @@ export function ClientOkrsMock({
 
   useEffect(() => {
     if (activeMainTab !== "portfolio-analysis") {
+      cancelPortfolioSummaries();
       return;
     }
 
     void ensurePortfolioSummaries().catch(() => undefined);
-  }, [activeMainTab, ensurePortfolioSummaries]);
+  }, [activeMainTab, cancelPortfolioSummaries, ensurePortfolioSummaries]);
 
   const portfolioProjectsForAnalysis = useMemo(
     () =>
@@ -3574,6 +4267,10 @@ export function ClientOkrsMock({
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId]
+  );
+  const activePortfolioProject = useMemo(
+    () => projects.find((project) => project.id === activePortfolioProjectId) ?? null,
+    [activePortfolioProjectId, projects]
   );
 
   useEffect(() => {
@@ -3747,6 +4444,9 @@ export function ClientOkrsMock({
 
   function clearFilters() {
     setSelectedProjectId("");
+    if (syncProjectInUrl && activeMainTab !== "portfolio-analysis") {
+      router.push("/workspace/okrs");
+    }
     setOkrs([]);
     setKeyProjects([]);
     setProjectKeyResultAnalyses([]);
@@ -3759,6 +4459,9 @@ export function ClientOkrsMock({
     setActiveOkr(null);
     setActiveOkrIndex(1);
     setActiveOkrInitialTab("overview");
+    setActivePortfolioProjectId(null);
+    setPortfolioProjectError(null);
+    setIsLoadingPortfolioProject(false);
     setActiveOkrReturnContext(null);
     setNewRecordType(null);
     setObjectiveSyncStatus(null);
@@ -3770,6 +4473,9 @@ export function ClientOkrsMock({
 
   function handleProjectChange(projectId: string) {
     setSelectedProjectId(projectId);
+    if (syncProjectInUrl && activeMainTab !== "portfolio-analysis") {
+      router.push(projectId ? `/workspace/okrs/project/${encodeURIComponent(projectId)}` : "/workspace/okrs");
+    }
     setOkrs([]);
     setKeyProjects([]);
     setProjectKeyResultAnalyses([]);
@@ -3784,6 +4490,9 @@ export function ClientOkrsMock({
     setActiveOkr(null);
     setActiveOkrIndex(1);
     setActiveOkrInitialTab("overview");
+    setActivePortfolioProjectId(null);
+    setPortfolioProjectError(null);
+    setIsLoadingPortfolioProject(false);
     setActiveOkrReturnContext(null);
     setNewRecordType(null);
     setObjectiveSyncStatus(null);
@@ -3876,6 +4585,54 @@ export function ClientOkrsMock({
 
     const refreshedData = await refreshProjectData(project.id);
     openKeyResultObjective(refreshedData.objectives);
+  }
+
+  async function handleOpenPortfolioProject(projectId: string) {
+    setActivePortfolioProjectId(projectId);
+    setPortfolioProjectError(null);
+
+    if (projectDataCache[projectId]) {
+      setIsLoadingPortfolioProject(false);
+      return;
+    }
+
+    setIsLoadingPortfolioProject(true);
+
+    try {
+      await ensureProjectData(projectId);
+    } catch (error) {
+      setPortfolioProjectError(
+        error instanceof Error ? error.message : "No fue posible cargar el Project overview."
+      );
+    } finally {
+      setIsLoadingPortfolioProject(false);
+    }
+  }
+
+  function handleOpenPortfolioProjectObjective(project: AgileProject, objective: AgileObjective, index: number) {
+    const data = projectDataCache[project.id];
+    const summary = portfolioProjectSummaries[project.id];
+    const analyses = projectSentimentCache[project.id] ?? summary?.analyses ?? [];
+
+    setSelectedProjectId(project.id);
+    setOkrs(data?.objectives ?? []);
+    setKeyProjects(data?.keyProjects ?? []);
+    setProjectKeyResultAnalyses(analyses);
+    setProjectSentimentError(null);
+    setObjectiveHealthAnalyses({});
+    setObjectiveHealthError(null);
+    setIsAnalyzingObjectiveHealth(false);
+    setSelectedStatus("ALL");
+    setSelectedQuarter("ALL");
+    setActiveFilter("status");
+    setActivePortfolioProjectId(null);
+    setActiveOkrReturnContext({
+      mainTab: "portfolio-analysis",
+      portfolioTab: "summary"
+    });
+    setActiveOkrInitialTab("overview");
+    setActiveOkrIndex(index + 1);
+    setActiveOkr(objective);
   }
 
   async function pollObjectiveSync(
@@ -4005,6 +4762,16 @@ export function ClientOkrsMock({
       setActiveMainTab(returnContext.mainTab);
       setPortfolioActiveTab(returnContext.portfolioTab);
     }
+  }
+
+  function handleObjectiveUpdated(updatedObjective: AgileObjective) {
+    setActiveOkr(updatedObjective);
+    setOkrs((currentObjectives) =>
+      currentObjectives.map((objective) =>
+        objective.id === updatedObjective.id ? updatedObjective : objective
+      )
+    );
+    invalidateProject(selectedProjectId);
   }
 
   return (
@@ -4181,17 +4948,11 @@ export function ClientOkrsMock({
         <>
           <div className="client-okrs-portfolio-tab-row">
             <PortfolioTabs activeTab={portfolioActiveTab} onChange={setPortfolioActiveTab} />
-            <div className="client-okrs-portfolio-tab-actions">
-              <NewOkrMenu disabled={!selectedProjectId} onSelect={setNewRecordType} />
-            </div>
           </div>
           {portfolioActiveTab === "summary" ? (
             <AccountSummaryView
               narrative={portfolioNarrative}
-              onSelectProject={(projectId) => {
-                handleProjectChange(projectId);
-                setActiveMainTab("portfolio-analysis");
-              }}
+              onOpenProject={handleOpenPortfolioProject}
               portfolioSummaries={portfolioProjectSummaries}
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -4284,6 +5045,24 @@ export function ClientOkrsMock({
         </div>
       ) : null}
 
+      {activePortfolioProject ? (
+        <PortfolioProjectOverviewPanel
+          error={portfolioProjectError}
+          isLoading={isLoadingPortfolioProject}
+          onClose={() => {
+            setActivePortfolioProjectId(null);
+            setPortfolioProjectError(null);
+            setIsLoadingPortfolioProject(false);
+          }}
+          onOpenObjective={(objective, index) =>
+            handleOpenPortfolioProjectObjective(activePortfolioProject, objective, index)
+          }
+          project={activePortfolioProject}
+          projectData={projectDataCache[activePortfolioProject.id]}
+          summary={portfolioProjectSummaries[activePortfolioProject.id]}
+        />
+      ) : null}
+
       {activeOkr ? (
         <OkrDetailModal
           initialTab={activeOkrInitialTab}
@@ -4295,6 +5074,7 @@ export function ClientOkrsMock({
           okr={activeOkr}
           okrIndex={activeOkrIndex}
           onClose={handleCloseActiveOkr}
+          onObjectiveUpdated={handleObjectiveUpdated}
           projects={projects}
         />
       ) : null}

@@ -1,4 +1,4 @@
-import { createTrustworthinessAssistantSession } from "../../../../src/airtable.js";
+import { createTrustworthinessAssistantSession } from "../../../../src/trustworthiness/assistant-session.js";
 import {
   badRequestResponse,
   getNormalizedEmailParam,

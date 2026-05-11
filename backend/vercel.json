@@ -77,6 +77,22 @@
       "destination": "/api/okrs/key-result-sentiments"
     },
     {
+      "source": "/okrs/bot/chat",
+      "destination": "/api/okrs/bot/chat"
+    },
+    {
+      "source": "/singular-agile/key-projects",
+      "destination": "/api/singular-agile/key-projects"
+    },
+    {
+      "source": "/singular-agile/key-results",
+      "destination": "/api/singular-agile/key-results"
+    },
+    {
+      "source": "/singular-agile/objectives",
+      "destination": "/api/singular-agile/objectives"
+    },
+    {
       "source": "/okrs/objective-health-analysis",
       "destination": "/api/okrs/objective-health-analysis"
     },
@@ -91,6 +107,14 @@
     {
       "source": "/okrs/ai/key-result-draft",
       "destination": "/api/okrs/ai/key-result-draft"
+    },
+    {
+      "source": "/okrs/ai/key-result-edit-draft",
+      "destination": "/api/okrs/ai/key-result-edit-draft"
+    },
+    {
+      "source": "/okrs/ai/key-project-draft",
+      "destination": "/api/okrs/ai/key-project-draft"
     }
   ]
 }

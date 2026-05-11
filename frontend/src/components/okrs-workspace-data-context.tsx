@@ -59,6 +59,7 @@ type ProjectsState = {
 };
 
 type OkrsWorkspaceDataContextValue = {
+  cancelPortfolioSummaries: () => void;
   ensureKeyResultHistoryBulk: (keyResultIds: string[]) => Promise<PortfolioKrHistoryCache>;
   ensurePortfolioNarrative: (
     signature: string,
@@ -147,6 +148,7 @@ function getObjectiveKeyResults(objective: AgileObjective): AgileKeyResult[] {
     initialValue: null,
     metric: objective.metric,
     progress: objective.status === "Achieved" ? 100 : 0,
+    sourceRecordId: "",
     status: objective.status ?? "Linked",
     targetDate: objective.targetDate,
     targetValue: null,
@@ -222,6 +224,7 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
   const projectSentimentPromisesRef = useRef<Partial<Record<string, Promise<AgileKeyResultSentimentAnalysis[]>>>>({});
   const historyPromisesRef = useRef<Partial<Record<string, Promise<PortfolioKrHistoryCache>>>>({});
   const narrativePromisesRef = useRef<Partial<Record<string, Promise<PortfolioNarrativeState>>>>({});
+  const portfolioSummariesRunRef = useRef(0);
 
   const projectDataCacheRef = useRef(projectDataCache);
   const projectSentimentCacheRef = useRef(projectSentimentCache);
@@ -363,8 +366,18 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
     return promise;
   }, []);
 
+  const cancelPortfolioSummaries = useCallback(() => {
+    portfolioSummariesRunRef.current += 1;
+  }, []);
+
   const ensurePortfolioSummaries = useCallback(async () => {
+    const runId = portfolioSummariesRunRef.current + 1;
+    portfolioSummariesRunRef.current = runId;
     const projects = await ensureProjects();
+
+    if (portfolioSummariesRunRef.current !== runId) {
+      return portfolioProjectSummariesRef.current;
+    }
 
     setPortfolioProjectSummaries((current) => {
       const next = { ...current };
@@ -387,9 +400,18 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
       return next;
     });
 
-    await runWithConcurrency(projects, 4, async (project) => {
+    await runWithConcurrency(projects, 1, async (project) => {
+      if (portfolioSummariesRunRef.current !== runId) {
+        return;
+      }
+
       try {
         const data = await ensureProjectData(project.id);
+
+        if (portfolioSummariesRunRef.current !== runId) {
+          return;
+        }
+
         const keyResults = data.objectives.flatMap((objective) => getObjectiveKeyResults(objective));
         const cachedAnalyses = projectSentimentCacheRef.current[project.id];
         const initialAnalyses =
@@ -426,6 +448,11 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
         }
 
         const analyses = await ensureProjectSentiments(project.id, keyResults);
+
+        if (portfolioSummariesRunRef.current !== runId) {
+          return;
+        }
+
         setPortfolioProjectSummaries((current) => {
           const next = {
             ...current,
@@ -646,6 +673,7 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
 
   const value = useMemo<OkrsWorkspaceDataContextValue>(
     () => ({
+      cancelPortfolioSummaries,
       ensureKeyResultHistoryBulk,
       ensurePortfolioNarrative,
       ensurePortfolioSummaries,
@@ -663,6 +691,7 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
       projectsStatus: projectsState.status
     }),
     [
+      cancelPortfolioSummaries,
       ensureKeyResultHistoryBulk,
       ensurePortfolioNarrative,
       ensurePortfolioSummaries,

@@ -1,4 +1,4 @@
-import { createAgileObjective, listAgileObjectivesForProject } from "../../src/airtable.js";
+import { createAgileObjective, listAgileObjectivesForProject } from "../../src/okrs/airtable-objectives.js";
 
 export async function GET(request: Request) {
   try {

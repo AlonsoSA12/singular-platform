@@ -1,4 +1,4 @@
-import { listAgileKeyResultHistoryBulk } from "../../../src/airtable.js";
+import { listAgileKeyResultHistoryBulk } from "../../../src/okrs/airtable-key-result-history.js";
 
 type KeyResultHistoryBulkBody = {
   keyResultIds?: string[];
