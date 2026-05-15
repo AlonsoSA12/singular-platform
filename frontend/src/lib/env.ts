@@ -31,6 +31,10 @@ export function getBackendBaseUrl() {
   return requireEnv("BACKEND_BASE_URL");
 }
 
+export function getOptionalBackendProtectionBypassSecret() {
+  return readEnv("BACKEND_PROTECTION_BYPASS_SECRET");
+}
+
 export function getOptionalSessionSecret() {
   return readEnv("SESSION_SECRET");
 }

@@ -2,15 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useToast } from "@/components/app-toasts";
 import { TrustworthinessWorkspace } from "@/components/trustworthiness-workspace";
+import { WorkspacePageFrame } from "@/components/workspace-page-frame";
 import type { WalkthroughVariant } from "@/components/trustworthiness-workspace/types";
 import { WorkspaceSettings } from "@/components/workspace-settings";
-
-type WorkspaceShellContentProps = {
-  userInitial: string;
-  userLabel: string;
-  userRole: string;
-};
+import { useWorkspaceUser } from "@/components/workspace-user-context";
 
 type WalkthroughStep = {
   autoOpenPanel?: "agent" | "context" | "save_confirmation";
@@ -116,9 +113,18 @@ const CHATBOT_WALKTHROUGH_STEPS: WalkthroughStep[] = [
       "Este botón inicia el flujo demo del chatbot de revisión. El sistema prepara una sugerencia TW simulada, monta reuniones demo y luego abre el chat.",
     enterAction: "open_chatbot",
     id: "chatbot-entry",
-    selector: '[data-walkthrough="chatbot-entry"]',
+    selector: '[data-walkthrough="chatbot-entry-row"]',
     targetPanel: "workspace",
     title: "Abrir chat desde la tabla"
+  },
+  {
+    body:
+      "Apenas se abre el flujo, aquí ves la ventana completa del chat de revisión: header, propuesta, mensajes, acciones rápidas y composer dentro del panel lateral.",
+    id: "chatbot-shell-window",
+    selector: '[data-walkthrough="chatbot-shell"]',
+    targetPanel: "chat",
+    title: "Ventana completa del chat",
+    waitFor: "chat_shell"
   },
   {
     body:
@@ -168,9 +174,9 @@ const CHATBOT_WALKTHROUGH_STEPS: WalkthroughStep[] = [
   {
     autoOpenPanel: "context",
     body:
-      "Desde este acceso se abre el panel de contexto del chat, donde se resume qué información alimenta al asistente antes de conversar o guardar.",
+      "Desde la cabecera del chat se abre el panel de contexto. Aquí queda visible el header completo y se resalta el acceso que resume qué información alimenta al asistente antes de conversar o guardar.",
     id: "chatbot-context-trigger",
-    selector: '[data-walkthrough="chatbot-context-trigger"]',
+    selector: '[data-walkthrough="chatbot-shell-header"]',
     targetPanel: "chat",
     title: "Abrir contexto del chat",
     waitFor: "chat_step"
@@ -205,9 +211,9 @@ const CHATBOT_WALKTHROUGH_STEPS: WalkthroughStep[] = [
   },
   {
     body:
-      "Cuando la propuesta ya fue revisada, este es el disparador para preparar el guardado desde el chat. En el walkthrough no persiste cambios reales.",
+      "Desde la cabecera del chat también preparas el guardado. En este paso se mantiene visible el header y se resalta el icono que abre la confirmación final, sin persistir cambios reales.",
     id: "chatbot-save-trigger",
-    selector: '[data-walkthrough="chatbot-save-trigger"]',
+    selector: '[data-walkthrough="chatbot-shell-header"]',
     targetPanel: "chat",
     title: "Preparar guardado",
     waitFor: "chat_step"
@@ -236,21 +242,15 @@ type HighlightRect = {
   width: number;
 };
 
-export function WorkspaceShellContent({
-  userInitial,
-  userLabel,
-  userRole
-}: WorkspaceShellContentProps) {
+export function WorkspaceShellContent() {
+  const { userInitial, userLabel, userRole } = useWorkspaceUser();
+  const toast = useToast();
   const walkthroughMenuRef = useRef<HTMLDetailsElement>(null);
   const [activeWalkthroughVariant, setActiveWalkthroughVariant] =
     useState<WalkthroughVariant>("manual");
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [highlightRect, setHighlightRect] = useState<HighlightRect | null>(null);
-  const [walkthroughToast, setWalkthroughToast] = useState<{
-    id: number;
-    message: string;
-  } | null>(null);
 
   const activeSteps = WALKTHROUGH_DEFINITIONS[activeWalkthroughVariant];
   const activeStep =
@@ -281,22 +281,6 @@ export function WorkspaceShellContent({
       document.removeEventListener("pointerdown", handlePointerDown);
     };
   }, []);
-
-  useEffect(() => {
-    if (!walkthroughToast) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setWalkthroughToast((current) =>
-        current?.id === walkthroughToast.id ? null : current
-      );
-    }, 2600);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [walkthroughToast]);
 
   useEffect(() => {
     if (!isWalkthroughOpen) {
@@ -404,70 +388,67 @@ export function WorkspaceShellContent({
     closeWalkthrough();
 
     if (message) {
-      setWalkthroughToast({
-        id: Date.now(),
+      toast.info({
         message
       });
     }
   }
 
   function handleWalkthroughToast(message: string) {
-    setWalkthroughToast({
-      id: Date.now(),
+    toast.info({
       message
     });
   }
 
   return (
-    <div className="workspace-shell-main">
-      <header className="workspace-topbar">
-        <div className="workspace-topbar-copy" data-walkthrough="workspace-overview">
-          <span className="workspace-topbar-eyebrow">Workspace</span>
-          <div className="workspace-topbar-heading">
-            <h1>Monthly Trustworthiness</h1>
-            <p>Singular Platform</p>
-          </div>
-        </div>
-
-        <div className="workspace-topbar-actions">
-          <details className="workspace-topbar-walkthrough-menu" ref={walkthroughMenuRef}>
-            <summary
-              aria-label="Opciones de walkthrough de TW Monthly"
-              className="workspace-topbar-info workspace-topbar-info-button"
-            >
-              <svg viewBox="0 0 24 24">
-                <path d="M12 2.75A9.25 9.25 0 1 0 21.25 12 9.26 9.26 0 0 0 12 2.75Zm0 1.5A7.75 7.75 0 1 1 4.25 12 7.76 7.76 0 0 1 12 4.25Zm0 3a1.06 1.06 0 1 0 0 2.12 1.06 1.06 0 0 0 0-2.12Zm-1 4.13a.75.75 0 0 0 0 1.5h.25v3.87H11a.75.75 0 0 0 0 1.5h2a.75.75 0 0 0 0-1.5h-.25v-4.62a.75.75 0 0 0-.75-.75Z" />
-              </svg>
-            </summary>
-            <div className="workspace-topbar-walkthrough-panel">
-              <button
-                className="workspace-topbar-walkthrough-option"
-                onClick={() => openWalkthrough("manual")}
-                type="button"
+    <>
+      <WorkspacePageFrame
+        actions={
+          <>
+            <details className="workspace-topbar-walkthrough-menu" ref={walkthroughMenuRef}>
+              <summary
+                aria-label="Opciones de walkthrough de TW Monthly"
+                className="workspace-topbar-info workspace-topbar-info-button"
               >
-                <strong>WT Manual</strong>
-                <span>Recorre el flujo actual completo de TW Monthly.</span>
-              </button>
-              <button
-                className="workspace-topbar-walkthrough-option"
-                onClick={handleOpenChatbotWalkthrough}
-                type="button"
-              >
-                <strong>WT Chatbot</strong>
-                <span>Recorre el flujo conversacional con Generate TW, reuniones y respuestas demo.</span>
-              </button>
-            </div>
-          </details>
-          <WorkspaceSettings
-            userInitial={userInitial}
-            userLabel={userLabel}
-            userRole={userRole}
-            variant="header"
-          />
-        </div>
-      </header>
-
-      <section className="workspace-main">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 2.75A9.25 9.25 0 1 0 21.25 12 9.26 9.26 0 0 0 12 2.75Zm0 1.5A7.75 7.75 0 1 1 4.25 12 7.76 7.76 0 0 1 12 4.25Zm0 3a1.06 1.06 0 1 0 0 2.12 1.06 1.06 0 0 0 0-2.12Zm-1 4.13a.75.75 0 0 0 0 1.5h.25v3.87H11a.75.75 0 0 0 0 1.5h2a.75.75 0 0 0 0-1.5h-.25v-4.62a.75.75 0 0 0-.75-.75Z" />
+                </svg>
+              </summary>
+              <div className="workspace-topbar-walkthrough-panel">
+                <button
+                  className="workspace-topbar-walkthrough-option"
+                  onClick={() => openWalkthrough("manual")}
+                  type="button"
+                >
+                  <strong>WT Manual</strong>
+                  <span>Recorre el flujo actual completo de TW Monthly.</span>
+                </button>
+                <button
+                  className="workspace-topbar-walkthrough-option"
+                  onClick={handleOpenChatbotWalkthrough}
+                  type="button"
+                >
+                  <strong>WT Chatbot</strong>
+                  <span>
+                    Recorre el flujo conversacional con Generate TW, reuniones y respuestas
+                    demo.
+                  </span>
+                </button>
+              </div>
+            </details>
+            <WorkspaceSettings
+              userInitial={userInitial}
+              userLabel={userLabel}
+              userRole={userRole}
+              variant="header"
+            />
+          </>
+        }
+        copyProps={{ "data-walkthrough": "workspace-overview" }}
+        eyebrow="Workspace"
+        subtitle="Singular Platform"
+        title="Monthly Trustworthiness"
+      >
         <TrustworthinessWorkspace
           isWalkthroughOpen={isWalkthroughOpen}
           onWalkthroughAbort={handleWalkthroughAbort}
@@ -476,7 +457,7 @@ export function WorkspaceShellContent({
           walkthroughStepId={activeStep?.id ?? null}
           walkthroughVariant={isWalkthroughOpen ? activeWalkthroughVariant : null}
         />
-      </section>
+      </WorkspacePageFrame>
 
       {isWalkthroughOpen && typeof document !== "undefined"
         ? createPortal(
@@ -595,15 +576,6 @@ export function WorkspaceShellContent({
             document.body
           )
         : null}
-
-      {walkthroughToast && typeof document !== "undefined"
-        ? createPortal(
-            <div className="workspace-topbar-toast" role="status">
-              {walkthroughToast.message}
-            </div>,
-            document.body
-          )
-        : null}
-    </div>
+    </>
   );
 }

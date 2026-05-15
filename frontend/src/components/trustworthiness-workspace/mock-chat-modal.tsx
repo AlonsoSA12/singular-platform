@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { useToast } from "@/components/app-toasts";
 import {
   calculateTrustworthinessScoreFromProposal,
   createTrustworthinessAssistantWelcomeMessage,
@@ -24,6 +25,7 @@ import {
   SuggestionStarEditor
 } from "./helpers";
 import { TrustworthinessSaveConfirmationModal } from "./main-sections";
+import type { TrustworthinessAssistantRuntimeConfig } from "@/lib/trustworthiness";
 import type {
   ChatMessage,
   CoachingContextRecord,
@@ -35,6 +37,7 @@ import type {
   TrustworthinessAssistantMeeting,
   TrustworthinessAssistantProposal,
   TrustworthinessAssistantReplyResponse,
+  TrustworthinessAssistantStreamEvent,
   TrustworthinessRatingStatus,
   TrustworthinessRecord,
   TwSuggestionResponse,
@@ -76,11 +79,21 @@ type PendingPillarUpdate = {
   nextValue: number;
 };
 
-type SaveSuccessToast = {
+type AgentActivity = {
   id: string;
-  message: string;
-  title: string;
+  label: string;
+  status: "done" | "running";
+  type: "status" | "tool";
 };
+
+type AgentStreamResult =
+  | {
+      reply: TrustworthinessAssistantReplyResponse & { sessionId: string };
+      sessionExpired: false;
+    }
+  | {
+      sessionExpired: true;
+    };
 
 const CHAT_AGENT_CONFIG = {
   actions: [
@@ -135,6 +148,21 @@ const CHAT_AGENT_CONFIG = {
   status: "draft",
   version: "0.1.0"
 };
+const CHAT_ASSISTANT_MEETING_LIMIT = 8;
+const CHAT_ASSISTANT_TEXT_LIMIT = 900;
+const CHAT_ASSISTANT_SHORT_TEXT_LIMIT = 260;
+
+function getAgentProviderLabel(provider: TrustworthinessAssistantRuntimeConfig["provider"]) {
+  return provider === "deepseek" ? "DeepSeek" : "OpenAI";
+}
+
+function getAgentConnectionLabel(runtimeConfig: TrustworthinessAssistantRuntimeConfig | null) {
+  if (!runtimeConfig) {
+    return "Cargando";
+  }
+
+  return runtimeConfig.hasApiKey ? "Key configurada" : "Falta API key";
+}
 
 function formatGeneratedAt(value: string) {
   const parsedDate = new Date(value);
@@ -193,15 +221,33 @@ function createPillarUpdatePrompt(params: {
 
 function mergeSavedRecordWithProposal(params: {
   proposal: TrustworthinessAssistantProposal;
+  ratingStatus: TrustworthinessRatingStatus;
   record: TrustworthinessRecord;
   twSuggestion: TwSuggestionResponse | null;
 }) {
+  const trustworthinessScore = calculateTrustworthinessScoreFromProposal(params.proposal);
   const nextFields: Record<string, unknown> = {
     ...params.record.fields,
+    "Credibility Meaning": getEditablePillarMeaning(
+      "credibility",
+      params.proposal.credibilityPoints
+    ),
     "Credibility Points": params.proposal.credibilityPoints,
     "Feedback": params.proposal.feedback,
+    "Group Thinking Meaning": getEditablePillarMeaning(
+      "groupThinking",
+      params.proposal.groupThinkingPoints
+    ),
     "Group Thinking Points": params.proposal.groupThinkingPoints,
+    "Intimacy Meaning": getEditablePillarMeaning("intimacy", params.proposal.intimacyPoints),
     "Intimacy Points": params.proposal.intimacyPoints,
+    "Rating Status": params.ratingStatus,
+    "Reliability Meaning": getEditablePillarMeaning(
+      "reliability",
+      params.proposal.reliabilityPoints
+    ),
+    "Trustworthiness": trustworthinessScore,
+    "Trustworthiness Meaning": getTrustworthinessMeaningFromScore(trustworthinessScore),
     "Reliability Points": params.proposal.reliabilityPoints
   };
 
@@ -403,6 +449,31 @@ function getMetricsScores(record: CoachingContextRecord) {
   return scores;
 }
 
+function truncateChatContextText(value: string | null | undefined, limit = CHAT_ASSISTANT_TEXT_LIMIT) {
+  const normalizedValue = typeof value === "string" ? value.trim() : "";
+
+  if (normalizedValue.length <= limit) {
+    return normalizedValue || null;
+  }
+
+  return `${normalizedValue.slice(0, limit).trimEnd()}...`;
+}
+
+function compactChatContextList(values: string[], limit: number, textLimit = CHAT_ASSISTANT_SHORT_TEXT_LIMIT) {
+  return values
+    .map((value) => truncateChatContextText(value, textLimit))
+    .filter((value): value is string => Boolean(value))
+    .slice(0, limit);
+}
+
+function compactChatContextMetrics(scores: Record<string, number | null>) {
+  return Object.fromEntries(
+    Object.entries(scores)
+      .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+      .slice(0, 12)
+  );
+}
+
 function buildAssistantMeetings(
   coachingContextResponse: CoachingContextResponse | null
 ): TrustworthinessAssistantMeeting[] {
@@ -410,16 +481,18 @@ function buildAssistantMeetings(
     return [];
   }
 
-  return coachingContextResponse.records.map((record) => ({
-    actionItems: getStringArrayField(record, "action_items"),
-    coachingAnalysis: getStringField(record, "coaching_analysis"),
-    coachingSummary: getStringField(record, "coaching_summary"),
+  return coachingContextResponse.records.slice(0, CHAT_ASSISTANT_MEETING_LIMIT).map((record) => ({
+    actionItems: compactChatContextList(getStringArrayField(record, "action_items"), 5),
+    coachingAnalysis: truncateChatContextText(getStringField(record, "coaching_analysis")),
+    coachingSummary: truncateChatContextText(getStringField(record, "coaching_summary")),
     meetingDatetime: getStringField(record, "meeting_datetime"),
     meetingId: record.id,
-    metricsScores: getMetricsScores(record),
-    title: getCoachingMeetingTitle(record),
-    topics: getStringArrayField(record, "topics"),
-    transcriptSummary: getStringField(record, "transcript_summary")
+    metricsScores: compactChatContextMetrics(getMetricsScores(record)),
+    title:
+      truncateChatContextText(getCoachingMeetingTitle(record), CHAT_ASSISTANT_SHORT_TEXT_LIMIT) ??
+      "Reunión sin título",
+    topics: compactChatContextList(getStringArrayField(record, "topics"), 8, 120),
+    transcriptSummary: truncateChatContextText(getStringField(record, "transcript_summary"))
   }));
 }
 
@@ -443,6 +516,36 @@ function getAssistantReply(payload: unknown): TrustworthinessAssistantReplyRespo
   return payload as TrustworthinessAssistantReplyResponse;
 }
 
+function getAssistantFinalReply(
+  payload: TrustworthinessAssistantStreamEvent
+): (TrustworthinessAssistantReplyResponse & { sessionId: string }) | null {
+  if (payload.type !== "assistant_structured_final") {
+    return null;
+  }
+
+  if (
+    typeof payload.changeSource !== "string" ||
+    typeof payload.evidenceQuestion !== "string" && payload.evidenceQuestion !== null ||
+    typeof payload.message !== "string" ||
+    typeof payload.needsOptionalEvidence !== "boolean" ||
+    !isPlainRecord(payload.proposal) ||
+    typeof payload.proposalChanged !== "boolean" ||
+    !Array.isArray(payload.citations) ||
+    typeof payload.sessionId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    ok: true
+  };
+}
+
+function isAssistantStreamEvent(value: unknown): value is TrustworthinessAssistantStreamEvent {
+  return isPlainRecord(value) && typeof value.type === "string";
+}
+
 function getChangeSourceLabel(changeSource: TrustworthinessAssistantChangeSource) {
   if (changeSource === "human_override") {
     return "Ajuste aplicado por criterio del evaluador";
@@ -457,6 +560,162 @@ function getChangeSourceLabel(changeSource: TrustworthinessAssistantChangeSource
   }
 
   return "Sin cambios en la propuesta";
+}
+
+function renderMarkdownInline(text: string, keyPrefix: string) {
+  const nodes: ReactNode[] = [];
+  const tokenPattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  let cursor = 0;
+  let tokenIndex = 0;
+
+  for (const match of text.matchAll(tokenPattern)) {
+    const matchIndex = match.index ?? 0;
+    const token = match[0];
+
+    if (matchIndex > cursor) {
+      nodes.push(text.slice(cursor, matchIndex));
+    }
+
+    if (token.startsWith("`")) {
+      nodes.push(
+        <code key={`${keyPrefix}-code-${tokenIndex}`}>
+          {token.slice(1, -1)}
+        </code>
+      );
+    } else if (token.startsWith("**")) {
+      nodes.push(
+        <strong key={`${keyPrefix}-strong-${tokenIndex}`}>
+          {token.slice(2, -2)}
+        </strong>
+      );
+    } else {
+      nodes.push(
+        <em key={`${keyPrefix}-em-${tokenIndex}`}>
+          {token.slice(1, -1)}
+        </em>
+      );
+    }
+
+    cursor = matchIndex + token.length;
+    tokenIndex += 1;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+
+  return nodes;
+}
+
+function renderChatMarkdown(content: string) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let paragraphLines: string[] = [];
+  let unorderedItems: string[] = [];
+  let orderedItems: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) {
+      return;
+    }
+
+    const blockIndex = blocks.length;
+    blocks.push(
+      <p key={`paragraph-${blockIndex}`}>
+        {renderMarkdownInline(paragraphLines.join(" "), `paragraph-${blockIndex}`)}
+      </p>
+    );
+    paragraphLines = [];
+  };
+
+  const flushUnorderedList = () => {
+    if (unorderedItems.length === 0) {
+      return;
+    }
+
+    const blockIndex = blocks.length;
+    blocks.push(
+      <ul key={`ul-${blockIndex}`}>
+        {unorderedItems.map((item, itemIndex) => (
+          <li key={`ul-${blockIndex}-${itemIndex}`}>
+            {renderMarkdownInline(item, `ul-${blockIndex}-${itemIndex}`)}
+          </li>
+        ))}
+      </ul>
+    );
+    unorderedItems = [];
+  };
+
+  const flushOrderedList = () => {
+    if (orderedItems.length === 0) {
+      return;
+    }
+
+    const blockIndex = blocks.length;
+    blocks.push(
+      <ol key={`ol-${blockIndex}`}>
+        {orderedItems.map((item, itemIndex) => (
+          <li key={`ol-${blockIndex}-${itemIndex}`}>
+            {renderMarkdownInline(item, `ol-${blockIndex}-${itemIndex}`)}
+          </li>
+        ))}
+      </ol>
+    );
+    orderedItems = [];
+  };
+
+  const flushLists = () => {
+    flushUnorderedList();
+    flushOrderedList();
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushParagraph();
+      flushLists();
+      continue;
+    }
+
+    const headingMatch = /^(#{1,3})\s+(.+)$/.exec(line);
+    const unorderedMatch = /^[-*]\s+(.+)$/.exec(line);
+    const orderedMatch = /^\d+[.)]\s+(.+)$/.exec(line);
+
+    if (headingMatch) {
+      flushParagraph();
+      flushLists();
+      const blockIndex = blocks.length;
+      blocks.push(
+        <strong className="trustworthiness-chatbot-markdown-heading" key={`heading-${blockIndex}`}>
+          {renderMarkdownInline(headingMatch[2], `heading-${blockIndex}`)}
+        </strong>
+      );
+      continue;
+    }
+
+    if (unorderedMatch) {
+      flushParagraph();
+      flushOrderedList();
+      unorderedItems.push(unorderedMatch[1]);
+      continue;
+    }
+
+    if (orderedMatch) {
+      flushParagraph();
+      flushUnorderedList();
+      orderedItems.push(orderedMatch[1]);
+      continue;
+    }
+
+    flushLists();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushLists();
+
+  return <div className="trustworthiness-chatbot-markdown">{blocks}</div>;
 }
 
 function getWalkthroughFocusPillar(
@@ -582,10 +841,13 @@ function createWalkthroughDemoMessages(params: {
 }
 
 export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModalProps) {
+  const toast = useToast();
   const [draftMessage, setDraftMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [proposal, setProposal] = useState<TrustworthinessAssistantProposal | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [agentActivities, setAgentActivities] = useState<AgentActivity[]>([]);
+  const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
   const [isResponding, setIsResponding] = useState(false);
   const [isSaveReady, setIsSaveReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -597,9 +859,19 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
   const [pillarUpdatePrompt, setPillarUpdatePrompt] = useState("");
   const [isSaveConfirmationOpen, setIsSaveConfirmationOpen] = useState(false);
   const [saveConfirmationError, setSaveConfirmationError] = useState<string | null>(null);
-  const [saveSuccessToast, setSaveSuccessToast] = useState<SaveSuccessToast | null>(null);
+  const [streamingAssistantMessage, setStreamingAssistantMessage] = useState("");
+  const [streamingDecisionTrace, setStreamingDecisionTrace] = useState<string[]>([]);
+  const [showStreamingFallback, setShowStreamingFallback] = useState(false);
+  const [runtimeConfig, setRuntimeConfig] =
+    useState<TrustworthinessAssistantRuntimeConfig | null>(null);
+  const [runtimeConfigError, setRuntimeConfigError] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const respondingToastIdRef = useRef<number | null>(null);
   const isWalkthroughMode = props.walkthroughVariant === "chatbot";
+  const isContextTriggerWalkthroughActive =
+    isWalkthroughMode && props.walkthroughStepId === "chatbot-context-trigger";
+  const isSaveTriggerWalkthroughActive =
+    isWalkthroughMode && props.walkthroughStepId === "chatbot-save-trigger";
   const recordSummaryDependencyKey = props.recordSummary
     ? [
         props.recordSummary.evaluatedName,
@@ -632,6 +904,10 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
         })
       : [];
   const displayedMessages = isWalkthroughMode ? [...messages, ...walkthroughDemoMessages] : messages;
+  const runtimeProviderLabel = runtimeConfig
+    ? getAgentProviderLabel(runtimeConfig.provider)
+    : "Cargando";
+  const runtimeConnectionLabel = getAgentConnectionLabel(runtimeConfig);
 
   useEffect(() => {
     if (!props.recordSummary) {
@@ -652,6 +928,8 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
       })
     );
     setChatError(null);
+    setAgentActivities([]);
+    setAgentSessionId(null);
     setIsResponding(false);
     setIsSaveReady(false);
     setIsSaving(false);
@@ -662,7 +940,9 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     setPillarUpdatePrompt("");
     setIsSaveConfirmationOpen(false);
     setSaveConfirmationError(null);
-    setSaveSuccessToast(null);
+    setStreamingAssistantMessage("");
+    setStreamingDecisionTrace([]);
+    setShowStreamingFallback(false);
   }, [
     coachingContextDependencyKey,
     props.initialFeedback,
@@ -670,6 +950,50 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     recordSummaryDependencyKey,
     twSuggestionDependencyKey
   ]);
+
+  useEffect(() => {
+    if (!props.isAgentConfigPanelOpen) {
+      return;
+    }
+
+    let isMounted = true;
+
+    async function loadRuntimeConfig() {
+      try {
+        setRuntimeConfigError(null);
+        const response = await fetch("/api/trustworthiness/assistant/config", {
+          cache: "no-store"
+        });
+        const payload = (await response.json()) as {
+          config?: TrustworthinessAssistantRuntimeConfig;
+          message?: string;
+          ok?: boolean;
+        };
+
+        if (!response.ok || !payload.ok || !payload.config) {
+          throw new Error(payload.message ?? "No fue posible leer la configuracion del agente.");
+        }
+
+        if (isMounted) {
+          setRuntimeConfig(payload.config);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setRuntimeConfigError(
+            error instanceof Error
+              ? error.message
+              : "No fue posible leer la configuracion del agente."
+          );
+        }
+      }
+    }
+
+    void loadRuntimeConfig();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [props.isAgentConfigPanelOpen]);
 
   useEffect(() => {
     if (!messagesRef.current) {
@@ -687,8 +1011,25 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     isWalkthroughMode,
     messages,
     props.coachingContextResponse,
+    streamingAssistantMessage,
+    streamingDecisionTrace,
     props.twSuggestion
   ]);
+
+  useEffect(() => {
+    if (!isResponding || streamingAssistantMessage.trim().length > 0) {
+      setShowStreamingFallback(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setShowStreamingFallback(true);
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isResponding, streamingAssistantMessage]);
 
   useEffect(() => {
     if (!isWalkthroughMode || !props.walkthroughStepId || !messagesRef.current) {
@@ -714,6 +1055,7 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
 
     const frameId = window.requestAnimationFrame(() => {
       switch (props.walkthroughStepId) {
+        case "chatbot-shell-window":
         case "chatbot-shell":
         case "chatbot-proposal":
           messagesElement.scrollTop = 0;
@@ -739,24 +1081,32 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
   ]);
 
   useEffect(() => {
-    if (!saveSuccessToast) {
+    if (isResponding && respondingToastIdRef.current === null) {
+      respondingToastIdRef.current = toast.progress({
+        message: "Actualizando la propuesta del chat.",
+        persistent: true,
+        title: "Asistente revisando"
+      });
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      setSaveSuccessToast(null);
-    }, 2800);
+    if (!isResponding && respondingToastIdRef.current !== null) {
+      toast.dismiss(respondingToastIdRef.current);
+      respondingToastIdRef.current = null;
+    }
+  }, [isResponding, toast]);
 
+  useEffect(() => {
     return () => {
-      window.clearTimeout(timeoutId);
+      if (respondingToastIdRef.current !== null) {
+        toast.dismiss(respondingToastIdRef.current);
+        respondingToastIdRef.current = null;
+      }
     };
-  }, [saveSuccessToast]);
+  }, [toast]);
 
   useEffect(() => {
     if (!isWalkthroughMode) {
-      if (isSaveConfirmationOpen) {
-        setIsSaveConfirmationOpen(false);
-      }
       return;
     }
 
@@ -787,15 +1137,20 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     !isResponding &&
     !isSaving &&
     !isSaved;
-  const canOpenSaveConfirmation =
-    Boolean(props.recordId) &&
-    Boolean(props.twSuggestion) &&
-    Boolean(props.selectedPeriodCoverage) &&
-    Boolean(recordSummary.evaluatedEmail) &&
+  const canInteractWithSaveConfirmation =
     Boolean(proposal) &&
     !isResponding &&
     !isSaving &&
     (!isSaved || isWalkthroughMode);
+  const saveConfirmationBlockerReason = !props.recordId
+    ? "Falta la evaluación activa para guardar."
+    : !props.twSuggestion
+      ? "Primero debes generar la sugerencia TW antes de guardar."
+      : !props.selectedPeriodCoverage
+        ? "Falta el período evaluado para guardar la propuesta."
+        : !recordSummary.evaluatedEmail
+          ? "Falta el email del talento evaluado, así que no se puede confirmar el guardado."
+          : null;
   const proposalScore = proposal ? calculateTrustworthinessScoreFromProposal(proposal) : null;
   const proposalPercentage = proposal ? formatTrustworthinessPercentageFromProposal(proposal) : null;
   const proposalMeaning =
@@ -840,6 +1195,245 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     }
   ];
 
+  function markAgentActivityDone() {
+    setAgentActivities((current) =>
+      current.map((activity) =>
+        activity.status === "running" ? { ...activity, status: "done" } : activity
+      )
+    );
+  }
+
+  function pushAgentActivity(label: string, type: AgentActivity["type"]) {
+    markAgentActivityDone();
+    setAgentActivities((current) => [
+      ...current.slice(-5),
+      {
+        id: createMessageId("agent-activity"),
+        label,
+        status: "running",
+        type
+      }
+    ]);
+  }
+
+  async function startAgentSession(activeProposal: TrustworthinessAssistantProposal) {
+    if (
+      !props.recordId ||
+      !props.twSuggestion ||
+      !props.selectedPeriodCoverage ||
+      !recordSummary.evaluatedEmail ||
+      !props.coachingContextResponse
+    ) {
+      throw new Error("Falta contexto para preparar la sesión del agente.");
+    }
+
+    const response = await fetch(
+      `/api/trustworthiness/${encodeURIComponent(props.recordId)}/assistant/session`,
+      {
+        body: JSON.stringify({
+          end: props.selectedPeriodCoverage.end,
+          evaluatedName: recordSummary.evaluatedName,
+          existingFeedback: props.initialFeedback,
+          meetings: assistantMeetings,
+          participantEmail: recordSummary.evaluatedEmail,
+          projectContext: recordSummary.context,
+          proposal: activeProposal,
+          roleLabel: recordSummary.roleLabel,
+          start: props.selectedPeriodCoverage.start,
+          suggestion: props.twSuggestion
+        }),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+    const payload = (await response.json()) as unknown;
+
+    if (!response.ok || !isPlainRecord(payload) || typeof payload.sessionId !== "string") {
+      const message =
+        isPlainRecord(payload) && typeof payload.message === "string"
+          ? payload.message
+          : "No fue posible preparar la sesión del agente.";
+      throw new Error(message);
+    }
+
+    setAgentSessionId(payload.sessionId);
+    return payload.sessionId;
+  }
+
+  async function ensureAgentSession(activeProposal: TrustworthinessAssistantProposal) {
+    if (agentSessionId) {
+      return agentSessionId;
+    }
+
+    pushAgentActivity("Preparando sesión del agente", "status");
+    const sessionId = await startAgentSession(activeProposal);
+    markAgentActivityDone();
+
+    return sessionId;
+  }
+
+  async function readAgentStream(response: Response): Promise<AgentStreamResult> {
+    if (!response.body) {
+      throw new Error("El agente no devolvió un stream válido.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalReply: (TrustworthinessAssistantReplyResponse & { sessionId: string }) | null = null;
+    let sessionExpired = false;
+
+    async function processLine(line: string) {
+      const trimmedLine = line.trim();
+
+      if (!trimmedLine) {
+        return;
+      }
+
+      const parsedEvent = JSON.parse(trimmedLine) as unknown;
+
+      if (!isAssistantStreamEvent(parsedEvent)) {
+        return;
+      }
+
+      if (parsedEvent.type === "status") {
+        pushAgentActivity(parsedEvent.label, "status");
+        return;
+      }
+
+      if (parsedEvent.type === "assistant_text_delta") {
+        setStreamingAssistantMessage((current) => `${current}${parsedEvent.delta}`);
+        return;
+      }
+
+      if (parsedEvent.type === "tool_start") {
+        pushAgentActivity(parsedEvent.label, "tool");
+        return;
+      }
+
+      if (parsedEvent.type === "tool_done") {
+        markAgentActivityDone();
+        return;
+      }
+
+      if (parsedEvent.type === "decision_trace_delta") {
+        setStreamingDecisionTrace((current) => [...current, parsedEvent.delta].slice(-5));
+        return;
+      }
+
+      if (parsedEvent.type === "error") {
+        if (parsedEvent.code === "SESSION_EXPIRED") {
+          sessionExpired = true;
+          return;
+        }
+
+        throw new Error(parsedEvent.message);
+      }
+
+      const nextFinalReply = getAssistantFinalReply(parsedEvent);
+
+      if (nextFinalReply) {
+        finalReply = nextFinalReply;
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        await processLine(line);
+      }
+    }
+
+    if (buffer.trim().length > 0) {
+      await processLine(buffer);
+    }
+
+    if (sessionExpired) {
+      return { sessionExpired: true as const };
+    }
+
+    if (!finalReply) {
+      throw new Error("El agente no devolvió una respuesta final válida.");
+    }
+
+    markAgentActivityDone();
+    return {
+      reply: finalReply,
+      sessionExpired: false as const
+    };
+  }
+
+  function createAgentStreamRehydratePayload(activeProposal: TrustworthinessAssistantProposal) {
+    if (
+      !props.selectedPeriodCoverage ||
+      !recordSummary.evaluatedEmail ||
+      !props.twSuggestion ||
+      !props.coachingContextResponse
+    ) {
+      return null;
+    }
+
+    return {
+      end: props.selectedPeriodCoverage.end,
+      evaluatedName: recordSummary.evaluatedName,
+      history: messages
+        .filter(
+          (message): message is ChatMessage & { role: "assistant" | "user" } =>
+            (message.role === "assistant" || message.role === "user") &&
+            typeof message.content === "string" &&
+            message.content.trim().length > 0
+        )
+        .map((message) => ({
+          content: message.content.trim(),
+          role: message.role
+        })),
+      meetings: assistantMeetings,
+      participantEmail: recordSummary.evaluatedEmail,
+      projectContext: recordSummary.context,
+      proposal: activeProposal,
+      roleLabel: recordSummary.roleLabel,
+      start: props.selectedPeriodCoverage.start,
+      suggestion: props.twSuggestion
+    };
+  }
+
+  async function sendAgentStreamMessage(params: {
+    prompt: string;
+    rehydrate?: ReturnType<typeof createAgentStreamRehydratePayload>;
+    sessionId: string;
+  }): Promise<AgentStreamResult> {
+    const response = await fetch(
+      `/api/trustworthiness/${encodeURIComponent(props.recordId ?? "")}/assistant/message/stream`,
+      {
+        body: JSON.stringify(params),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(payload?.message ?? "No fue posible iniciar el stream del agente.");
+    }
+
+    return readAgentStream(response);
+  }
+
   async function sendAssistantMessage(userMessage: string) {
     const activeProposal = proposal;
 
@@ -858,55 +1452,43 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
       id: createMessageId("user"),
       role: "user"
     };
-    const history = messages.map((message) => ({
-      content: message.content,
-      role: message.role
-    }));
 
     setDraftMessage("");
     setChatError(null);
+    setAgentActivities([]);
     setSaveConfirmationError(null);
     setIsResponding(true);
     setIsSaveReady(false);
+    setStreamingAssistantMessage("");
+    setStreamingDecisionTrace([]);
+    setShowStreamingFallback(false);
     setMessages((current) => [...current, userChatMessage]);
 
     try {
-      const response = await fetch(
-        `/api/trustworthiness/${encodeURIComponent(props.recordId)}/assistant/message`,
-        {
-          body: JSON.stringify({
-            evaluatedName: recordSummary.evaluatedName,
-            history,
-            meetings: assistantMeetings,
-            projectContext: recordSummary.context,
-            prompt: trimmedMessage,
-            proposal: activeProposal,
-            roleLabel: recordSummary.roleLabel,
-            suggestion: props.twSuggestion
-          }),
-          cache: "no-store",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          method: "POST"
-        }
-      );
-      const parsedPayload = (await response.json()) as unknown;
+      let activeSessionId = await ensureAgentSession(activeProposal);
+      let streamResult = await sendAgentStreamMessage({
+        prompt: trimmedMessage,
+        rehydrate: createAgentStreamRehydratePayload(activeProposal),
+        sessionId: activeSessionId
+      });
 
-      if (!response.ok) {
-        const message =
-          isPlainRecord(parsedPayload) && typeof parsedPayload.message === "string"
-            ? parsedPayload.message
-            : "No fue posible continuar la conversación del asistente.";
-        throw new Error(message);
+      if (streamResult.sessionExpired) {
+        setAgentSessionId(null);
+        activeSessionId = await startAgentSession(activeProposal);
+        streamResult = await sendAgentStreamMessage({
+          prompt: trimmedMessage,
+          rehydrate: createAgentStreamRehydratePayload(activeProposal),
+          sessionId: activeSessionId
+        });
       }
 
-      const assistantReply = getAssistantReply(parsedPayload);
+      const assistantReply = streamResult.sessionExpired ? null : streamResult.reply;
 
       if (!assistantReply) {
-        throw new Error("El asistente no devolvió una respuesta válida.");
+        throw new Error("El agente no devolvió una respuesta válida.");
       }
 
+      setAgentSessionId(assistantReply.sessionId);
       setProposal(assistantReply.proposal);
       setLastProposalChanged(assistantReply.proposalChanged);
       setLastChangeSource(assistantReply.changeSource);
@@ -918,6 +1500,7 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
           changeSource: assistantReply.changeSource,
           citations: assistantReply.citations,
           content: assistantReply.message,
+          decisionTrace: assistantReply.decisionTrace ?? [],
           evidenceQuestion: assistantReply.evidenceQuestion,
           focusArea: assistantReply.focusArea,
           id: createMessageId("assistant"),
@@ -930,10 +1513,13 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
       setChatError(
         sendError instanceof Error
           ? sendError.message
-          : "No fue posible continuar la conversación del asistente."
+          : "No fue posible continuar la conversación del agente."
       );
     } finally {
       setIsResponding(false);
+      setStreamingAssistantMessage("");
+      setStreamingDecisionTrace([]);
+      setShowStreamingFallback(false);
     }
   }
 
@@ -964,13 +1550,16 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
   }
 
   function handleOpenSaveConfirmation() {
-    if (!canOpenSaveConfirmation) {
+    if (!canInteractWithSaveConfirmation) {
+      if (!proposal) {
+        setChatError("Falta la propuesta activa antes de guardar.");
+      }
       return;
     }
 
     setIsSaveConfirmationOpen(true);
     setChatError(null);
-    setSaveConfirmationError(null);
+    setSaveConfirmationError(saveConfirmationBlockerReason);
   }
 
   function handleCloseSaveConfirmation() {
@@ -1095,6 +1684,7 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
 
       const savedRecord = mergeSavedRecordWithProposal({
         proposal: proposalToSave,
+        ratingStatus,
         record: parsedPayload.record,
         twSuggestion: props.twSuggestion
       });
@@ -1104,8 +1694,8 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
       setIsSaveReady(false);
       setLastProposalChanged(false);
       setLastChangeSource("none");
-      setSaveSuccessToast({
-        id: createMessageId("save-toast"),
+      toast.success({
+        durationMs: 2800,
         message:
           ratingStatus === "Done"
             ? "Se guardaron puntajes, feedback, datos de IA y el status final quedó en Done."
@@ -1225,7 +1815,11 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
               {headerActionItems.map((item) => (
                 <button
                   aria-label={item.tooltip}
-                  className="trustworthiness-chatbot-icon"
+                  className={`trustworthiness-chatbot-icon ${
+                    item.id === "context" && isContextTriggerWalkthroughActive
+                      ? "is-walkthrough-active"
+                      : ""
+                  }`}
                   data-tooltip={item.tooltip}
                   key={item.id}
                   onClick={
@@ -1260,10 +1854,12 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
               </button>
               <button
                 aria-label={isSaved ? "Evaluación guardada" : "Guardar evaluación"}
-                className="trustworthiness-chatbot-icon is-primary-action"
+                className={`trustworthiness-chatbot-icon is-primary-action ${
+                  isSaveTriggerWalkthroughActive ? "is-walkthrough-active" : ""
+                }`}
                 data-walkthrough="chatbot-save-trigger"
                 data-tooltip={isSaved ? "Evaluación guardada" : "Guardar evaluación"}
-                disabled={!canOpenSaveConfirmation}
+                disabled={!canInteractWithSaveConfirmation}
                 onClick={handleOpenSaveConfirmation}
                 type="button"
               >
@@ -1371,13 +1967,28 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
                           : getPillarLabel(message.focusArea)}
                       </small>
                     ) : null}
-                    <p>{message.content}</p>
+                    {renderChatMarkdown(message.content)}
                     {message.role === "assistant" &&
                     message.changeSource &&
                     message.changeSource !== "none" ? (
                       <div className="trustworthiness-chatbot-change-source">
                         {getChangeSourceLabel(message.changeSource)}
                       </div>
+                    ) : null}
+                    {message.role === "assistant" &&
+                    message.decisionTrace &&
+                    message.decisionTrace.length > 0 ? (
+                      <details className="trustworthiness-chatbot-reasoning">
+                        <summary>
+                          <span>Razonamiento</span>
+                          <small>{message.decisionTrace.length} puntos</small>
+                        </summary>
+                        <ul>
+                          {message.decisionTrace.map((trace, index) => (
+                            <li key={`${trace}-${index}`}>{trace}</li>
+                          ))}
+                        </ul>
+                      </details>
                     ) : null}
                     {message.role === "assistant" &&
                     message.needsOptionalEvidence &&
@@ -1388,23 +1999,70 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
                       </div>
                     ) : null}
                     {message.citations && message.citations.length > 0 ? (
-                      <div className="trustworthiness-chatbot-citations">
-                        <span>Evidencia citada</span>
-                        {message.citations.map((citation) => (
-                          <button
-                            key={`${citation.meetingId}-${citation.reason}`}
-                            onClick={() => props.onOpenTranscript(citation.meetingId)}
-                            type="button"
-                          >
-                            <strong>{citation.meetingTitle}</strong>
-                            <small>{citation.reason}</small>
-                          </button>
-                        ))}
-                      </div>
+                      <details className="trustworthiness-chatbot-citations">
+                        <summary>
+                          <span>Evidencia citada</span>
+                          <small>
+                            {message.citations.length}{" "}
+                            {message.citations.length === 1 ? "cita" : "citas"}
+                          </small>
+                        </summary>
+                        <div className="trustworthiness-chatbot-citations-list">
+                          {message.citations.map((citation) => (
+                            <button
+                              key={`${citation.meetingId}-${citation.reason}`}
+                              onClick={() => props.onOpenTranscript(citation.meetingId)}
+                              type="button"
+                            >
+                              <strong>{citation.meetingTitle}</strong>
+                              <small>{citation.reason}</small>
+                            </button>
+                          ))}
+                        </div>
+                      </details>
                     ) : null}
                   </div>
                 </article>
               ))}
+
+              {isResponding ? (
+                <article
+                  aria-live="polite"
+                  className="trustworthiness-mock-chat-row is-assistant is-thinking"
+                  role="status"
+                >
+                  <span className="trustworthiness-mock-chat-label">Asistente TW</span>
+                  <div className="trustworthiness-mock-chat-bubble trustworthiness-mock-chat-thinking">
+                    {streamingAssistantMessage.trim().length > 0 ? (
+                      <>
+                        {renderChatMarkdown(streamingAssistantMessage)}
+                        {streamingDecisionTrace.length > 0 ? (
+                          <details className="trustworthiness-chatbot-reasoning" open>
+                            <summary>
+                              <span>Cómo está evaluando la IA</span>
+                              <small>{streamingDecisionTrace.length} puntos</small>
+                            </summary>
+                            <ul>
+                              {streamingDecisionTrace.map((trace, index) => (
+                                <li key={`${trace}-${index}`}>{trace}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <span>{showStreamingFallback ? "Generando respuesta..." : "Esperando respuesta..."}</span>
+                        <span aria-hidden="true" className="trustworthiness-mock-chat-thinking-dots">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </article>
+              ) : null}
 
             </div>
 
@@ -1462,7 +2120,7 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
                 ) : null}
                 <button
                   className="trustworthiness-chatbot-send"
-                  aria-label={isResponding ? "Pensando" : "Enviar mensaje"}
+                  aria-label={isResponding ? "Generando respuesta" : "Enviar mensaje"}
                   disabled={!canUseAssistant || draftMessage.trim().length === 0}
                   onClick={handleSubmit}
                   type="button"
@@ -1486,9 +2144,12 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
         }
         errorMessage={saveConfirmationError}
         eyebrow={isWalkthroughMode ? "Confirmación demo" : "Confirmar guardado"}
+        hideCancelButton={isWalkthroughMode}
+        hideCurrentSelection={isWalkthroughMode}
         isOpen={isSaveConfirmationOpen}
         isSaving={isSaving}
         onClose={handleCloseSaveConfirmation}
+        onDismiss={isWalkthroughMode ? props.onWalkthroughComplete : undefined}
         onDiscard={handleDiscardSaveConfirmation}
         onSaveAsDone={() => {
           void handleConfirmSave("Done");
@@ -1496,8 +2157,23 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
         onSaveAsDraft={() => {
           void handleConfirmSave("Pending");
         }}
+        closeTooltip={isWalkthroughMode ? "Cerrar demostración" : undefined}
+        discardTooltip={
+          isWalkthroughMode ? "Cierra la demo sin ejecutar ningún guardado." : undefined
+        }
+        doneTooltip={
+          isWalkthroughMode
+            ? "Muestra el cierre como Done sin ejecutar el guardado real."
+            : undefined
+        }
+        draftTooltip={
+          isWalkthroughMode
+            ? "Muestra el cierre como Draft, que en datos reales se guarda como Pending."
+            : undefined
+        }
         savingStatus={null}
         selectedStatus={suggestedSaveStatus}
+        showCloseIcon={isWalkthroughMode}
         summaryBadges={[officialPeriodLabel, recordSummary.evaluatedName]}
         title={
           isWalkthroughMode
@@ -1568,46 +2244,6 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
                   >
                     Confirmar y enviar
                   </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-
-      {isResponding
-        ? createPortal(
-            <div
-              aria-live="polite"
-              className="tw-suggestion-toast-layer chat-action-toast-layer"
-              role="status"
-              style={{ zIndex: props.chatZIndex + 3 }}
-            >
-              <div className="tw-suggestion-notification is-progress chat-action-toast">
-                <span aria-hidden="true">TW</span>
-                <div className="tw-suggestion-notification-copy">
-                  <strong>Asistente revisando</strong>
-                  <p>Actualizando la propuesta del chat.</p>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-
-      {saveSuccessToast
-        ? createPortal(
-            <div
-              aria-live="polite"
-              className="tw-suggestion-toast-layer chat-action-toast-layer"
-              role="status"
-              style={{ zIndex: props.chatZIndex + 3 }}
-            >
-              <div className="tw-suggestion-notification chat-action-toast" key={saveSuccessToast.id}>
-                <span aria-hidden="true">OK</span>
-                <div className="tw-suggestion-notification-copy">
-                  <strong>{saveSuccessToast.title}</strong>
-                  <p>{saveSuccessToast.message}</p>
                 </div>
               </div>
             </div>,
@@ -1872,30 +2508,45 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
 
                 <section className="transcript-section">
                   <h5>Modelo</h5>
+                  {runtimeConfigError ? (
+                    <p className="chat-agent-config-description">{runtimeConfigError}</p>
+                  ) : null}
                   <div className="chat-context-summary-grid">
                     <div className="chat-context-summary-item">
-                      <span>Modelo recomendado</span>
-                      <strong>{CHAT_AGENT_CONFIG.model.recommended}</strong>
+                      <span>Proveedor activo</span>
+                      <strong>{runtimeProviderLabel}</strong>
                     </div>
                     <div className="chat-context-summary-item">
-                      <span>Fallback</span>
-                      <strong>{CHAT_AGENT_CONFIG.model.fallback}</strong>
+                      <span>Estado de key</span>
+                      <strong>{runtimeConnectionLabel}</strong>
                     </div>
                     <div className="chat-context-summary-item">
-                      <span>Temperatura</span>
-                      <strong>{CHAT_AGENT_CONFIG.model.temperature}</strong>
+                      <span>Modelo default</span>
+                      <strong>{runtimeConfig?.model ?? CHAT_AGENT_CONFIG.model.recommended}</strong>
+                    </div>
+                    <div className="chat-context-summary-item">
+                      <span>Chat de revisión</span>
+                      <strong>{runtimeConfig?.assistantModel ?? CHAT_AGENT_CONFIG.model.recommended}</strong>
+                    </div>
+                    <div className="chat-context-summary-item">
+                      <span>Sugerencia TW</span>
+                      <strong>{runtimeConfig?.suggestionModel ?? CHAT_AGENT_CONFIG.model.recommended}</strong>
+                    </div>
+                    <div className="chat-context-summary-item">
+                      <span>Feedback</span>
+                      <strong>{runtimeConfig?.feedbackModel ?? CHAT_AGENT_CONFIG.model.recommended}</strong>
+                    </div>
+                    <div className="chat-context-summary-item">
+                      <span>API</span>
+                      <strong>{runtimeConfig?.apiMode ?? "Cargando"}</strong>
                     </div>
                     <div className="chat-context-summary-item">
                       <span>Formato</span>
-                      <strong>{CHAT_AGENT_CONFIG.model.responseFormat}</strong>
+                      <strong>{runtimeConfig?.responseFormat ?? CHAT_AGENT_CONFIG.model.responseFormat}</strong>
                     </div>
                     <div className="chat-context-summary-item">
-                      <span>Reasoning</span>
-                      <strong>{CHAT_AGENT_CONFIG.model.reasoningEffort}</strong>
-                    </div>
-                    <div className="chat-context-summary-item">
-                      <span>Max output</span>
-                      <strong>{CHAT_AGENT_CONFIG.model.maxOutputTokens}</strong>
+                      <span>Base URL</span>
+                      <strong>{runtimeConfig?.baseUrl ?? "Cargando"}</strong>
                     </div>
                   </div>
                 </section>

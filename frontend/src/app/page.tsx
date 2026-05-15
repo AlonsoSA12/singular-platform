@@ -9,32 +9,35 @@ export default async function LoginPage() {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-hero">
-        <div className="hero-panel">
-          <p className="eyebrow">Singular Barcelo</p>
-          <h2>Arquitectura inicial para una entrada simple, segura y desacoplada.</h2>
-          <p>
-            El backend valida usuarios contra Airtable. El frontend mantiene la sesion y
-            expone un espacio de trabajo minimo para evolucionar el producto.
-          </p>
-          <div className="hero-grid">
-            <div>
-              <span>Frontend</span>
-              <strong>Next.js</strong>
-            </div>
-            <div>
-              <span>Backend</span>
-              <strong>Fastify</strong>
-            </div>
-            <div>
-              <span>Source of truth</span>
-              <strong>Airtable</strong>
-            </div>
-          </div>
+    <main className="ss-login-page">
+      <section className="ss-login-shell" aria-label="Singular Stories sign in">
+        <div className="ss-login-hero-copy">
+          <h1>
+            <span>
+              Where <strong>top talent</strong>
+            </span>
+            <span>
+              meets <strong>ambitious projects</strong>
+            </span>
+          </h1>
+          <p>The operating system for elite development teams</p>
         </div>
+
         <LoginForm />
+
+        <p className="ss-login-help">
+          Need help? Contact{" "}
+          <a href="mailto:support@singularagency.co">support@singularagency.co</a>
+        </p>
       </section>
+
+      <img
+        alt="Singular Stories"
+        className="ss-login-logo"
+        height={35}
+        src="/images/logo-dark.png"
+        width={140}
+      />
     </main>
   );
 }

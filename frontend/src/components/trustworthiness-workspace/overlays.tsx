@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -17,8 +16,7 @@ import {
   getSourceLabel,
   LoadingProgress,
   SUGGESTION_PILLAR_CONFIG,
-  SuggestionStarEditor,
-  TW_GENERATION_STEPS
+  SuggestionStarEditor
 } from "./helpers";
 import type {
   ChatMessage,
@@ -26,12 +24,9 @@ import type {
   RecordSummary,
   SuggestionAppliedPoints,
   SuggestionCacheNotice,
-  SuggestionNotification,
   SuggestionPillarKey,
   TrustworthinessAssistantProposal,
-  TrustworthinessFloatingToast,
   TrustworthinessRecord,
-  TwGenerationProgress,
   TwSuggestionResponse
 } from "./types";
 
@@ -631,137 +626,6 @@ export function TrustworthinessSuggestionSideSheet(props: TrustworthinessSuggest
         document.body
       )}
     </>
-  );
-}
-
-type TrustworthinessFloatingToastsProps = {
-  generationToasts: TrustworthinessFloatingToast[];
-  suggestionNotification: SuggestionNotification | null;
-  twGenerationProgress: TwGenerationProgress;
-};
-
-export function TrustworthinessFloatingToasts(props: TrustworthinessFloatingToastsProps) {
-  const [isGenerationToastExpanded, setIsGenerationToastExpanded] = useState(false);
-  const activeGenerationToastId =
-    props.generationToasts.find((toast) => toast.tone === "progress")?.id ?? null;
-
-  useEffect(() => {
-    setIsGenerationToastExpanded(false);
-  }, [activeGenerationToastId]);
-
-  const items = [
-    ...props.generationToasts,
-    ...(props.suggestionNotification
-      ? [
-          {
-            id: props.suggestionNotification.id,
-            isClosing: false,
-            message: props.suggestionNotification.message,
-            title: null,
-            tone: "success" as const
-          }
-        ]
-      : [])
-  ].sort((left, right) => left.id - right.id);
-
-  if (items.length === 0 || typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div aria-live="polite" className="tw-suggestion-toast-layer">
-      {items.map((item) => {
-        const isExpandableProgressToast =
-          item.id === activeGenerationToastId && item.tone === "progress";
-        const showExpandedSteps =
-          isExpandableProgressToast && isGenerationToastExpanded;
-        const completedStagesCount = props.twGenerationProgress.completedStages.length;
-
-        return (
-          <div
-            className={`tw-suggestion-notification is-${item.tone} ${item.isClosing ? "is-closing" : ""}`}
-            key={item.id}
-            role="status"
-          >
-            <span aria-hidden="true">
-              {item.tone === "error" ? "!" : item.tone === "success" ? "✓" : "⋯"}
-            </span>
-            <div className="tw-suggestion-notification-copy">
-              <div className="tw-suggestion-notification-main">
-                {item.title ? <strong>{item.title}</strong> : null}
-                <p>{item.message}</p>
-              </div>
-
-              {isExpandableProgressToast ? (
-                <div className="tw-suggestion-notification-actions">
-                  <small>
-                    {completedStagesCount} de {TW_GENERATION_STEPS.length} pasos completados
-                  </small>
-                  <button
-                    aria-controls={`tw-generation-toast-steps-${item.id}`}
-                    aria-expanded={showExpandedSteps}
-                    className="tw-suggestion-notification-toggle"
-                    onClick={() => setIsGenerationToastExpanded((current) => !current)}
-                    type="button"
-                  >
-                    {showExpandedSteps ? "Ocultar pasos" : "Ver pasos"}
-                  </button>
-                </div>
-              ) : null}
-
-              {showExpandedSteps ? (
-                <div
-                  className="tw-generation-toast-steps"
-                  id={`tw-generation-toast-steps-${item.id}`}
-                >
-                  {TW_GENERATION_STEPS.map((step, index) => {
-                    const isCurrent =
-                      props.twGenerationProgress.status === "running" &&
-                      props.twGenerationProgress.currentStage === step.id;
-                    const isError =
-                      props.twGenerationProgress.status === "error" &&
-                      props.twGenerationProgress.errorStage === step.id;
-                    const isComplete =
-                      props.twGenerationProgress.status === "success" ||
-                      props.twGenerationProgress.completedStages.includes(step.id);
-                    const statusLabel = isError
-                      ? "Error"
-                      : isCurrent
-                        ? "En progreso"
-                        : isComplete
-                          ? "Listo"
-                          : "Pendiente";
-                    const statusClass = isError
-                      ? "is-error"
-                      : isCurrent
-                        ? "is-current"
-                        : isComplete
-                          ? "is-complete"
-                          : "is-pending";
-
-                    return (
-                      <div
-                        className={`tw-generation-toast-step ${statusClass}`}
-                        key={step.id}
-                      >
-                        <div className="tw-generation-toast-step-indicator" aria-hidden="true">
-                          {isError ? "!" : isComplete ? "✓" : index + 1}
-                        </div>
-                        <div className="tw-generation-toast-step-copy">
-                          <strong>{step.label}</strong>
-                          <small>{statusLabel}</small>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
-    </div>,
-    document.body
   );
 }
 

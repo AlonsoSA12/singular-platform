@@ -1,4 +1,4 @@
-import { findUserByEmail } from "../../src/airtable.js";
+import { findUserByEmail } from "../../src/trustworthiness/airtable-records.js";
 
 type ValidateEmailBody = {
   email?: string;

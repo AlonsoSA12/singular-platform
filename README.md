@@ -24,6 +24,8 @@ SESSION_SECRET=
 FRONTEND_URL=http://localhost:3000
 BACKEND_PORT=4000
 BACKEND_BASE_URL=http://localhost:4000
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_REASONING_EFFORT=low
 ```
 
 ## Desarrollo local
@@ -60,5 +62,18 @@ Guia de deployments y ambientes:
 Estrategia objetivo de ramas y ambientes:
 
 - `development` -> ambiente remoto `dev`
+- URL oficial actual web:
+  - `https://ss-platform-development.singularagency.co`
+- alias Vercel actual web:
+  - `https://singular-platform-web-env-dev-singular-projects-f4874352.vercel.app`
+- URL oficial actual api:
+  - `https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
 - `preview` -> ambiente `Preview` estable para QA
 - `main` -> `Production` cuando se habilite ese flujo
+
+Decision actual:
+
+- `development` usa dominio propio para web
+- el ambiente remoto Vercel se llama `dev`, pero esta atado al env de `development`
+- mantenemos alias estable de Vercel para la API
+- mantenemos documentado el alias Vercel web como URL alternativa vigente

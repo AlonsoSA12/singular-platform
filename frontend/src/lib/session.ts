@@ -88,7 +88,6 @@ export async function readSession() {
 
   const session = parseSessionCookie(rawCookie, sessionSecret);
   if (!session) {
-    cookieStore.delete(SESSION_COOKIE);
     return null;
   }
 

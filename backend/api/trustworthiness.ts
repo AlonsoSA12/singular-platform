@@ -1,4 +1,4 @@
-import { listTrustworthinessRecords } from "../src/airtable.js";
+import { listTrustworthinessRecords } from "../src/trustworthiness/airtable-records.js";
 
 export async function GET(request: Request) {
   try {

@@ -209,6 +209,7 @@ export type TwGenerationStage =
 export type TwGenerationPhase = "idle" | "running" | "success" | "error";
 
 export type TwGenerationProgress = {
+  decisionTrace: string[];
   completedStages: TwGenerationStage[];
   currentStage: TwGenerationStage | null;
   errorMessage: string | null;
@@ -217,6 +218,10 @@ export type TwGenerationProgress = {
 };
 
 export type TwSuggestionStreamEvent =
+  | {
+      delta: string;
+      type: "decision_trace_delta";
+    }
   | {
       label: string;
       stage: TwGenerationStage;
@@ -233,19 +238,6 @@ export type TwSuggestionStreamEvent =
     };
 
 export type SuggestionAppliedPoints = Partial<Record<SuggestionPillarKey, number>>;
-
-export type SuggestionNotification = {
-  id: number;
-  message: string;
-};
-
-export type TrustworthinessFloatingToast = {
-  id: number;
-  isClosing: boolean;
-  message: string;
-  title: string | null;
-  tone: "progress" | "success" | "error";
-};
 
 export type TwSuggestionCacheMetadata = {
   end: string;
@@ -335,6 +327,7 @@ export type ChatMessage = {
   changeSource?: TrustworthinessAssistantChangeSource;
   citations?: TrustworthinessAssistantCitation[];
   content: string;
+  decisionTrace?: string[];
   evidenceQuestion?: string | null;
   focusArea?: TrustworthinessAssistantFocus;
   id: string;
@@ -355,15 +348,18 @@ export type TrustworthinessWorkspaceProps = {
 };
 
 export type TrustworthinessAssistantSessionResponse = {
+  expiresAt?: string;
   meetings: TrustworthinessAssistantMeeting[];
   ok: true;
   proposal: TrustworthinessAssistantProposal;
+  sessionId?: string;
   suggestion: TwSuggestionResponse;
 };
 
 export type TrustworthinessAssistantReplyResponse = {
   changeSource: TrustworthinessAssistantChangeSource;
   citations: TrustworthinessAssistantCitation[];
+  decisionTrace?: string[];
   evidenceQuestion: string | null;
   focusArea: TrustworthinessAssistantFocus;
   message: string;
@@ -374,11 +370,45 @@ export type TrustworthinessAssistantReplyResponse = {
   proposalChanged: boolean;
 };
 
+export type TrustworthinessAssistantStreamEvent =
+  | {
+      label: string;
+      type: "status";
+    }
+  | {
+      delta: string;
+      type: "assistant_text_delta";
+    }
+  | {
+      label: string;
+      tool: "searchMeetingEvidence" | "updateProposal" | "prepareSave";
+      type: "tool_start";
+    }
+  | {
+      result: Record<string, unknown>;
+      tool: "searchMeetingEvidence" | "updateProposal" | "prepareSave";
+      type: "tool_done";
+    }
+  | {
+      delta: string;
+      type: "decision_trace_delta";
+    }
+  | ({
+      sessionId: string;
+      type: "assistant_structured_final";
+    } & Omit<TrustworthinessAssistantReplyResponse, "ok">)
+  | {
+      code?: string;
+      message: string;
+      type: "error";
+    };
+
 export type DetailGroupsOptions = {
   aiSuggestions: Partial<Record<EditableScoreField, PillarSuggestion>>;
   draft: TrustworthinessDraft | null;
   editable: boolean;
   feedbackGenerationError: string | null;
+  feedbackRequiredError: string | null;
   isDirty: (target: EditableDraftTarget) => boolean;
   isGeneratingFeedback: boolean;
   onDiscard: (target: EditableDraftTarget) => void;

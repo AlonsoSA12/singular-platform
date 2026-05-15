@@ -1,4 +1,5 @@
 import { getBackendBaseUrl } from "@/lib/env";
+import { fetchFromBackend } from "@/lib/backend";
 import type { AuthenticatedUser } from "@/lib/types";
 
 type BackendAuthSuccess = {
@@ -16,7 +17,7 @@ type BackendAuthFailure = {
 export async function validateEmailAgainstBackend(email: string): Promise<AuthenticatedUser> {
   const backendBaseUrl = getBackendBaseUrl();
 
-  const response = await fetch(`${backendBaseUrl}/auth/validate-email`, {
+  const response = await fetchFromBackend(`${backendBaseUrl}/auth/validate-email`, {
     method: "POST",
     headers: {
       "content-type": "application/json"

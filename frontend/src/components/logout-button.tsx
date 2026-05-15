@@ -3,6 +3,22 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+const OKR_BOT_CHAT_HISTORY_STORAGE_PREFIXES = ["okr-bot-history:v1:", "okr-bot-history:v2:"];
+
+function clearOkrBotChatHistory() {
+  try {
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index);
+
+      if (key && OKR_BOT_CHAT_HISTORY_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // Logout should still proceed if browser storage is unavailable.
+  }
+}
+
 export function LogoutButton() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +35,8 @@ export function LogoutButton() {
       setError("No se pudo cerrar sesion.");
       return;
     }
+
+    clearOkrBotChatHistory();
 
     startTransition(() => {
       router.push("/");
