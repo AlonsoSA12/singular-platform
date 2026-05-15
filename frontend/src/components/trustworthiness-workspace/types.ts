@@ -239,19 +239,6 @@ export type TwSuggestionStreamEvent =
 
 export type SuggestionAppliedPoints = Partial<Record<SuggestionPillarKey, number>>;
 
-export type SuggestionNotification = {
-  id: number;
-  message: string;
-};
-
-export type TrustworthinessFloatingToast = {
-  id: number;
-  isClosing: boolean;
-  message: string;
-  title: string | null;
-  tone: "progress" | "success" | "error";
-};
-
 export type TwSuggestionCacheMetadata = {
   end: string;
   evaluatedEmail: string;

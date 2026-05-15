@@ -89,6 +89,8 @@ export function mapAgileKeyResult(record: AirtableRecord) {
   const fields = record.fields;
   const currentValue = getNumberField(fields, "Current Value");
   const initialValue = getNumberField(fields, "Initial Value");
+  const title = getTextField(fields, "Key Result") || getTextField(fields, "key_result");
+  const displayName = getTextField(fields, "Name") || title || record.id;
   const keyProjectIds = getLinkedRecordIds(
     getFieldValue(fields, "key_projects") ??
       getFieldValue(fields, "Key Projects") ??
@@ -109,6 +111,7 @@ export function mapAgileKeyResult(record: AirtableRecord) {
     id: record.id,
     code: getTextField(fields, "#"),
     currentValue,
+    displayName,
     explanation: getTextField(fields, "Explanation"),
     initialValue,
     keyProjectIds,
@@ -123,7 +126,7 @@ export function mapAgileKeyResult(record: AirtableRecord) {
     status: getTextField(fields, "Status"),
     targetDate: getTextField(fields, "Target Date"),
     targetValue,
-    title: getTextField(fields, "Key Result") || getTextField(fields, "Name") || record.id
+    title
   };
 }
 
@@ -141,15 +144,31 @@ export function mapAgileKeyResultHistoryPoint(record: AirtableRecord) {
     }) ?? storedProgress;
 
   return {
+    created: record.createdTime ?? getTextField(fields, "Created"),
     id: record.id,
     currentValue,
+    explanation: getTextField(fields, "Explanation"),
     initialValue,
+    justificationScoreKeyResult: getTextField(fields, "Justification Score Key Result"),
+    keyResultIds: getLinkedRecordIds(
+      getFieldValue(fields, "Key Result") ??
+        getFieldValue(fields, "key_result") ??
+        getFieldValue(fields, "key")
+    ),
+    metric: getTextField(fields, "Metric"),
     name: getTextField(fields, "Name"),
     no: getNumberField(fields, "No."),
+    objectiveIds: getLinkedRecordIds(
+      getFieldValue(fields, "Objetive") ??
+        getFieldValue(fields, "Objective") ??
+        getFieldValue(fields, "objective")
+    ),
     progress,
     progressNumber: getNumberField(fields, "Progress Number"),
+    projectIds: getLinkedRecordIds(getFieldValue(fields, "Project") ?? getFieldValue(fields, "project")),
     quarter: getTextField(fields, "Quarter"),
-    scoreKeyResult: getNumberField(fields, "Score Key Result"),
+    scoreKeyResult: getNumberField(fields, "Score Key Result") ?? getNumberField(fields, "score_key"),
+    sourceId: getTextField(fields, "source_id") || getTextField(fields, "sourceId"),
     status: getTextField(fields, "Status"),
     targetDate: getTextField(fields, "Target Date"),
     targetValue,
@@ -259,6 +278,7 @@ export function mapAgileKeyProject(record: AirtableRecord) {
     projectIds,
     qualityScore,
     sourceRecordId:
+      getFirstTextValue(getFieldValue(fields, "record_id")) ??
       getFirstTextValue(getFieldValue(fields, "source_record_id")) ??
       getFirstTextValue(getFieldValue(fields, "Record Id")) ??
       getFirstTextValue(getFieldValue(fields, "recordId")) ??

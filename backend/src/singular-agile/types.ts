@@ -114,3 +114,20 @@ export type SingularAgileUpdateKeyProjectResult = {
   };
   message?: string;
 };
+
+export type SingularAgileUpdateKeyResultHistoryResult = {
+  ok: boolean;
+  status: SingularAgileUpdateStatus;
+  updated: boolean;
+  tableName: string;
+  acceptedFields: string[];
+  unknownFields: string[];
+  missingRequiredFields: string[];
+  invalidFields: SingularAgileFieldIssue[];
+  record?: {
+    id: string;
+    createdTime?: string;
+    fields: Record<string, unknown>;
+  };
+  message?: string;
+};

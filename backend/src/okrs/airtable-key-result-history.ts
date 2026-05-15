@@ -1,4 +1,4 @@
-import { fetchRecordsByIds } from "../airtable/client.js";
+import { fetchAirtableRecords } from "../airtable/client.js";
 import { getAgileAirtableConnection } from "../airtable/config.js";
 import { getFieldValue, getLinkedRecordIds } from "../airtable/field-utils.js";
 import {
@@ -6,13 +6,12 @@ import {
   mapAgileKeyResultHistoryPoint
 } from "./airtable-mappers.js";
 
-function getAgileKeyResultHistoryRecordIds(record: { fields: Record<string, unknown> }) {
+function getAgileKeyResultHistoryKeyResultIds(record: { fields: Record<string, unknown> }) {
   return getLinkedRecordIds(
-    getFieldValue(record.fields, "Key Result Historic") ??
-      getFieldValue(record.fields, "Key Result History") ??
-      getFieldValue(record.fields, "key_result_history") ??
-      getFieldValue(record.fields, "key_result_historic") ??
-      getFieldValue(record.fields, "History")
+    getFieldValue(record.fields, "key") ??
+      getFieldValue(record.fields, "key_result") ??
+      getFieldValue(record.fields, "Key") ??
+      getFieldValue(record.fields, "Key Result")
   );
 }
 
@@ -29,41 +28,22 @@ export async function listAgileKeyResultHistoryBulk(keyResultIds: string[]) {
     };
   }
 
-  const keyResultRecords = await fetchRecordsByIds(
-    agileConnection.keyResultTableName,
-    normalizedKeyResultIds,
-    [],
-    {
-      apiToken: agileConnection.apiToken,
-      baseId: agileConnection.baseId
-    }
-  );
-  const historyRecordIds = [
-    ...new Set(keyResultRecords.flatMap((record) => getAgileKeyResultHistoryRecordIds(record)))
-  ];
-  const historyRecords = await fetchRecordsByIds(
-    agileConnection.keyResultHistoryTableName,
-    historyRecordIds,
-    [],
-    {
-      apiToken: agileConnection.apiToken,
-      baseId: agileConnection.baseId
-    }
-  );
-  const historyRecordsById = new Map(historyRecords.map((record) => [record.id, record]));
+  const requestedKeyResultIds = new Set(normalizedKeyResultIds);
+  const historyRecords = await fetchAirtableRecords(agileConnection.keyResultHistoryTableName, {
+    apiToken: agileConnection.apiToken,
+    baseId: agileConnection.baseId
+  });
   const historyByKeyResultId = Object.fromEntries(
     normalizedKeyResultIds.map((keyResultId) => [keyResultId, [] as ReturnType<typeof mapAgileKeyResultHistoryPoint>[]])
   );
 
-  for (const keyResultRecord of keyResultRecords) {
-    const keyResultId = keyResultRecord.id;
-    const linkedHistoryIds = getAgileKeyResultHistoryRecordIds(keyResultRecord);
+  for (const historyRecord of historyRecords) {
+    const linkedKeyResultIds = getAgileKeyResultHistoryKeyResultIds(historyRecord).filter((keyResultId) =>
+      requestedKeyResultIds.has(keyResultId)
+    );
 
-    for (const historyId of linkedHistoryIds) {
-      const historyRecord = historyRecordsById.get(historyId);
-      if (historyRecord) {
-        historyByKeyResultId[keyResultId]?.push(mapAgileKeyResultHistoryPoint(historyRecord));
-      }
+    for (const keyResultId of linkedKeyResultIds) {
+      historyByKeyResultId[keyResultId]?.push(mapAgileKeyResultHistoryPoint(historyRecord));
     }
   }
 

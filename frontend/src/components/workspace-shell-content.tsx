@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useToast } from "@/components/app-toasts";
 import { TrustworthinessWorkspace } from "@/components/trustworthiness-workspace";
 import { WorkspacePageFrame } from "@/components/workspace-page-frame";
 import type { WalkthroughVariant } from "@/components/trustworthiness-workspace/types";
@@ -243,16 +244,13 @@ type HighlightRect = {
 
 export function WorkspaceShellContent() {
   const { userInitial, userLabel, userRole } = useWorkspaceUser();
+  const toast = useToast();
   const walkthroughMenuRef = useRef<HTMLDetailsElement>(null);
   const [activeWalkthroughVariant, setActiveWalkthroughVariant] =
     useState<WalkthroughVariant>("manual");
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [highlightRect, setHighlightRect] = useState<HighlightRect | null>(null);
-  const [walkthroughToast, setWalkthroughToast] = useState<{
-    id: number;
-    message: string;
-  } | null>(null);
 
   const activeSteps = WALKTHROUGH_DEFINITIONS[activeWalkthroughVariant];
   const activeStep =
@@ -283,22 +281,6 @@ export function WorkspaceShellContent() {
       document.removeEventListener("pointerdown", handlePointerDown);
     };
   }, []);
-
-  useEffect(() => {
-    if (!walkthroughToast) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setWalkthroughToast((current) =>
-        current?.id === walkthroughToast.id ? null : current
-      );
-    }, 2600);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [walkthroughToast]);
 
   useEffect(() => {
     if (!isWalkthroughOpen) {
@@ -406,16 +388,14 @@ export function WorkspaceShellContent() {
     closeWalkthrough();
 
     if (message) {
-      setWalkthroughToast({
-        id: Date.now(),
+      toast.info({
         message
       });
     }
   }
 
   function handleWalkthroughToast(message: string) {
-    setWalkthroughToast({
-      id: Date.now(),
+    toast.info({
       message
     });
   }
@@ -592,15 +572,6 @@ export function WorkspaceShellContent() {
                   </button>
                 </div>
               </div>
-            </div>,
-            document.body
-          )
-        : null}
-
-      {walkthroughToast && typeof document !== "undefined"
-        ? createPortal(
-            <div className="workspace-topbar-toast" role="status">
-              {walkthroughToast.message}
             </div>,
             document.body
           )

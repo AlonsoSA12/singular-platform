@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Poppins } from "next/font/google";
+import { AppToastProvider } from "@/components/app-toasts";
 import "./globals.css";
 
 const poppins = Poppins({
@@ -39,7 +40,7 @@ export default function RootLayout({
     <html className={`${poppins.variable} ${jetbrainsMono.variable}`} lang="es" suppressHydrationWarning>
       <body>
         <script dangerouslySetInnerHTML={{ __html: themeInitializer }} />
-        {children}
+        <AppToastProvider>{children}</AppToastProvider>
       </body>
     </html>
   );

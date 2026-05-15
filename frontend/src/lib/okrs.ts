@@ -39,6 +39,7 @@ export type AgileObjective = {
 export type AgileKeyResult = {
   code: string;
   currentValue: number | null;
+  displayName?: string;
   explanation: string;
   id: string;
   initialValue: number | null;
@@ -54,15 +55,23 @@ export type AgileKeyResult = {
 };
 
 export type AgileKeyResultHistoryPoint = {
+  created: string;
   currentValue: number | null;
+  explanation: string;
   id: string;
   initialValue: number | null;
+  justificationScoreKeyResult: string;
+  keyResultIds: string[];
+  metric: string;
   name: string;
   no: number | null;
+  objectiveIds: string[];
   progress: number;
   progressNumber: number | null;
+  projectIds: string[];
   quarter: string;
   scoreKeyResult: number | null;
+  sourceId: string;
   status: string;
   targetDate: string;
   targetValue: number | null;
@@ -157,6 +166,8 @@ export type AgileKeyProject = {
   id: string;
   justification: string;
   keyProjectId: string;
+  keyResultIds: string[];
+  keyResultLabels?: string[];
   name: string;
   projectIds: string[];
   qualityScore: number;
@@ -230,6 +241,20 @@ export type SingularAgileKeyProjectUpdateInput = Partial<SingularAgileKeyProject
   recordId: string;
 };
 
+export type SingularAgileKeyProjectLinkSnapshot = {
+  id: string;
+  keyResultIds: string[];
+  keyResultLabels?: string[];
+  name: string;
+};
+
+type SingularAgileKeyProjectsSuccess = {
+  ok: true;
+  keyProjects: SingularAgileKeyProjectLinkSnapshot[];
+  recordCount: number;
+  tableName: string;
+};
+
 export type SingularAgileObjectiveInput = {
   aiSuggestedKeyResults?: string;
   description?: string;
@@ -262,7 +287,18 @@ export type SingularAgileKeyResultInput = {
 };
 
 export type SingularAgileKeyResultUpdateInput = Partial<SingularAgileKeyResultInput> & {
-  recordId: string;
+  recordId?: string;
+  sourceId?: string;
+  source_id?: string;
+};
+
+export type SingularAgileKeyResultHistoryUpdateInput = {
+  currentValue?: number | null;
+  initialValue?: number | null;
+  recordId?: string;
+  sourceId?: string;
+  source_id?: string;
+  targetValue?: number | null;
 };
 
 export type OkrBotAction =
@@ -393,6 +429,22 @@ type AgileKeyProjectDraftSuccess = {
   ok: true;
 };
 
+export type AgileKeyProjectKeyResultSuggestion = {
+  confidence: number;
+  keyResult: AgileKeyResult;
+  objective: {
+    id: string;
+    title: string;
+  };
+  reason: string;
+};
+
+type AgileKeyProjectKeyResultSuggestionsSuccess = {
+  model: string;
+  ok: true;
+  suggestions: AgileKeyProjectKeyResultSuggestion[];
+};
+
 type AgileCreateObjectiveSuccess = {
   objective: AgileObjective;
   ok: true;
@@ -433,10 +485,14 @@ type SingularAgileKeyProjectWriteSuccess = {
 
 type SingularAgileKeyResultWriteSuccess = SingularAgileKeyProjectWriteSuccess;
 
+type SingularAgileKeyResultHistoryWriteSuccess = SingularAgileKeyProjectWriteSuccess;
+
 type SingularAgileObjectiveWriteSuccess = SingularAgileKeyProjectWriteSuccess;
 
 type AgileProjectsFailure = {
+  invalidFields?: Array<{ field: string; message: string }>;
   message?: string;
+  missingRequiredFields?: string[];
   ok?: false;
 };
 
@@ -538,6 +594,23 @@ export async function fetchAgileKeyResultHistoryBulkFromBackend(keyResultIds: st
   );
 }
 
+export async function fetchSingularAgileKeyResultHistoryBulkFromBackend(keyResultIds: string[]) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-result-history/bulk`, {
+    body: JSON.stringify({ keyResultIds }),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileKeyResultHistoryBulkSuccess>(
+    response,
+    "No fue posible consultar el histórico de Key Results en Singular Agile."
+  );
+}
+
 export async function fetchAgileKeyResultHistoryBulk(keyResultIds: string[]) {
   const response = await fetch("/api/okrs/key-result-history/bulk", {
     body: JSON.stringify({ keyResultIds }),
@@ -551,6 +624,22 @@ export async function fetchAgileKeyResultHistoryBulk(keyResultIds: string[]) {
   return parseOkrsBackendJson<AgileKeyResultHistoryBulkSuccess>(
     response,
     "No fue posible consultar el historico de Key Results."
+  );
+}
+
+export async function fetchSingularAgileKeyResultHistoryBulk(keyResultIds: string[]) {
+  const response = await fetch("/api/singular-agile/key-result-history/bulk", {
+    body: JSON.stringify({ keyResultIds }),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileKeyResultHistoryBulkSuccess>(
+    response,
+    "No fue posible consultar el histórico de Key Results en Singular Agile."
   );
 }
 
@@ -822,6 +911,27 @@ export async function generateAgileKeyProjectDraft(input: {
   );
 }
 
+export async function suggestKeyResultsForKeyProject(input: {
+  keyProject: Pick<AgileKeyProject, "id" | "justification" | "keyProjectId" | "name" | "story">;
+  objectives: AgileObjective[];
+  projectId: string;
+  projectName: string;
+}) {
+  const response = await fetch("/api/okrs/key-projects/suggest-key-results", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+
+  return parseOkrsBackendJson<AgileKeyProjectKeyResultSuggestionsSuccess>(
+    response,
+    "No fue posible sugerir Key Results para este Key Project."
+  );
+}
+
 async function parseOkrsBackendJson<TSuccess extends { ok: true }>(
   response: Response,
   fallbackMessage: string
@@ -836,7 +946,22 @@ async function parseOkrsBackendJson<TSuccess extends { ok: true }>(
   const payload = (await response.json()) as TSuccess | AgileProjectsFailure;
 
   if (!response.ok || !("ok" in payload && payload.ok)) {
-    const message = "message" in payload ? payload.message : undefined;
+    const missingRequiredFields =
+      "missingRequiredFields" in payload && Array.isArray(payload.missingRequiredFields)
+        ? payload.missingRequiredFields
+        : [];
+    const invalidFields =
+      "invalidFields" in payload && Array.isArray(payload.invalidFields) ? payload.invalidFields : [];
+    const validationDetails = [
+      missingRequiredFields.length > 0 ? `Campos requeridos: ${missingRequiredFields.join(", ")}.` : "",
+      ...invalidFields.map((field) => `${field.field}: ${field.message}`)
+    ].filter(Boolean);
+    const message =
+      "message" in payload && payload.message
+        ? payload.message
+        : validationDetails.length > 0
+          ? validationDetails.join(" ")
+          : undefined;
     throw new Error(message ?? fallbackMessage);
   }
 
@@ -996,6 +1121,25 @@ export async function updateSingularAgileKeyResultInBackend(input: SingularAgile
   );
 }
 
+export async function updateSingularAgileKeyResultHistoryInBackend(
+  input: SingularAgileKeyResultHistoryUpdateInput
+) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-result-history`, {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyResultHistoryWriteSuccess>(
+    response,
+    "No fue posible actualizar el histórico del Key Result en Singular Agile."
+  );
+}
+
 export async function updateSingularAgileKeyProjectInBackend(input: SingularAgileKeyProjectUpdateInput) {
   const backendBaseUrl = getBackendBaseUrl();
   const response = await fetchFromBackend(`${backendBaseUrl}/singular-agile/key-projects`, {
@@ -1010,6 +1154,22 @@ export async function updateSingularAgileKeyProjectInBackend(input: SingularAgil
   return parseOkrsBackendJson<SingularAgileKeyProjectWriteSuccess>(
     response,
     "No fue posible actualizar el Key Project en Singular Agile."
+  );
+}
+
+export async function fetchSingularAgileKeyProjectsFromBackend(recordIds: string[]) {
+  const backendBaseUrl = getBackendBaseUrl();
+  const url = new URL(`${backendBaseUrl}/singular-agile/key-projects`);
+
+  url.searchParams.set("recordIds", recordIds.join(","));
+
+  const response = await fetchFromBackend(url, {
+    cache: "no-store"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyProjectsSuccess>(
+    response,
+    "No fue posible consultar los Key Projects en Singular Agile."
   );
 }
 
@@ -1157,6 +1317,22 @@ export async function updateSingularAgileKeyResult(input: SingularAgileKeyResult
   );
 }
 
+export async function updateSingularAgileKeyResultHistory(input: SingularAgileKeyResultHistoryUpdateInput) {
+  const response = await fetch("/api/singular-agile/key-result-history", {
+    body: JSON.stringify(input),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyResultHistoryWriteSuccess>(
+    response,
+    "No fue posible actualizar el histórico del Key Result en Singular Agile."
+  );
+}
+
 export async function updateSingularAgileKeyProject(input: SingularAgileKeyProjectUpdateInput) {
   const response = await fetch("/api/singular-agile/key-projects", {
     body: JSON.stringify(input),
@@ -1170,6 +1346,21 @@ export async function updateSingularAgileKeyProject(input: SingularAgileKeyProje
   return parseOkrsBackendJson<SingularAgileKeyProjectWriteSuccess>(
     response,
     "No fue posible actualizar el Key Project en Singular Agile."
+  );
+}
+
+export async function fetchSingularAgileKeyProjects(recordIds: string[]) {
+  const url = new URL("/api/singular-agile/key-projects", window.location.origin);
+
+  url.searchParams.set("recordIds", recordIds.join(","));
+
+  const response = await fetch(url, {
+    cache: "no-store"
+  });
+
+  return parseOkrsBackendJson<SingularAgileKeyProjectsSuccess>(
+    response,
+    "No fue posible consultar los Key Projects en Singular Agile."
   );
 }
 

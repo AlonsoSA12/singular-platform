@@ -1,4 +1,5 @@
-import { createAirtableRecord, updateAirtableRecord } from "../airtable/client.js";
+import { createAirtableRecord, fetchAirtableRecords, updateAirtableRecord } from "../airtable/client.js";
+import { escapeFormulaValue } from "../airtable/formula-utils.js";
 import type { AirtableRecord } from "../airtable/types.js";
 import { getSingularAgileConnection } from "./config.js";
 import type {
@@ -275,6 +276,29 @@ function normalizeRecordId(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function getSourceId(input: unknown) {
+  if (!isPlainObject(input)) {
+    return "";
+  }
+
+  return normalizeRecordId(input.sourceId ?? input.source_id);
+}
+
+async function resolveKeyResultRecordIdBySourceId(sourceId: string) {
+  if (!sourceId) {
+    return "";
+  }
+
+  const connection = getSingularAgileConnection();
+  const records = await fetchAirtableRecords(connection.keyResultTableName, {
+    apiToken: connection.apiToken,
+    baseId: connection.baseId,
+    filterByFormula: `{source_id}='${escapeFormulaValue(sourceId)}'`
+  });
+
+  return records[0]?.id ?? "";
+}
+
 export async function createSingularAgileKeyResult(input: unknown): Promise<SingularAgileCreateKeyResultResult> {
   const connection = getSingularAgileConnection();
   const validation = validateSingularAgileKeyResultInput(input);
@@ -333,13 +357,18 @@ export async function updateSingularAgileKeyResult(
   input: unknown
 ): Promise<SingularAgileUpdateKeyResultResult> {
   const connection = getSingularAgileConnection();
-  const normalizedRecordId = normalizeRecordId(recordId);
+  const sourceId = getSourceId(input);
+  let normalizedRecordId = normalizeRecordId(recordId);
   const validation = validateSingularAgileKeyResultUpdateInput(input);
   const invalidFields = [...validation.invalidFields];
   const missingRequiredFields = [...validation.missingRequiredFields];
 
   if (!normalizedRecordId) {
-    missingRequiredFields.push("recordId");
+    normalizedRecordId = await resolveKeyResultRecordIdBySourceId(sourceId);
+  }
+
+  if (!normalizedRecordId) {
+    missingRequiredFields.push(sourceId ? "recordId/source_id match" : "recordId or source_id");
   }
 
   if (Object.keys(validation.fields).length === 0) {

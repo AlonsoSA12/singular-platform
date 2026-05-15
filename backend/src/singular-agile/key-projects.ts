@@ -1,4 +1,5 @@
-import { createAirtableRecord, updateAirtableRecord } from "../airtable/client.js";
+import { createAirtableRecord, fetchRecordsByIds, updateAirtableRecord } from "../airtable/client.js";
+import { getFieldValue, getLinkedRecordIds } from "../airtable/field-utils.js";
 import type { AirtableRecord } from "../airtable/types.js";
 import { getSingularAgileConnection } from "./config.js";
 import type {
@@ -98,6 +99,32 @@ const UPDATE_FIELD_DEFINITIONS: FieldDefinition[] = [
   singularAgileKeyProjectFields.update.finalScore,
   singularAgileKeyProjectFields.update.justification
 ];
+
+export async function listSingularAgileKeyProjectsByIds(recordIds: string[]) {
+  const connection = getSingularAgileConnection();
+  const uniqueRecordIds = [...new Set(recordIds.map((recordId) => recordId.trim()).filter(Boolean))];
+  const records = await fetchRecordsByIds(
+    connection.keyProjectTableName,
+    uniqueRecordIds,
+    ["Epic Name", "key_result"],
+    {
+      apiToken: connection.apiToken,
+      baseId: connection.baseId
+    }
+  );
+
+  return {
+    ok: true,
+    recordCount: records.length,
+    tableName: connection.keyProjectTableName,
+    keyProjects: records.map((record) => ({
+      id: record.id,
+      keyResultIds: getLinkedRecordIds(getFieldValue(record.fields, "key_result")),
+      keyResultLabels: [],
+      name: typeof record.fields["Epic Name"] === "string" ? record.fields["Epic Name"] : ""
+    }))
+  };
+}
 
 const LEGACY_CREATE_FIELD_DEFINITIONS: FieldDefinition[] = [
   {

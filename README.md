@@ -62,14 +62,18 @@ Guia de deployments y ambientes:
 Estrategia objetivo de ramas y ambientes:
 
 - `development` -> ambiente remoto `dev`
-- alias oficial actual web:
+- URL oficial actual web:
+  - `https://ss-platform-development.singularagency.co`
+- alias Vercel actual web:
   - `https://singular-platform-web-env-dev-singular-projects-f4874352.vercel.app`
-- alias oficial actual api:
+- URL oficial actual api:
   - `https://singular-platform-api-env-dev-singular-projects-f4874352.vercel.app`
 - `preview` -> ambiente `Preview` estable para QA
 - `main` -> `Production` cuando se habilite ese flujo
 
 Decision actual:
 
-- no usamos dominio propio para ambientes remotos
-- usamos aliases estables de Vercel
+- `development` usa dominio propio para web
+- el ambiente remoto Vercel se llama `dev`, pero esta atado al env de `development`
+- mantenemos alias estable de Vercel para la API
+- mantenemos documentado el alias Vercel web como URL alternativa vigente

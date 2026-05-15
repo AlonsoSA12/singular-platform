@@ -71,11 +71,13 @@ type OkrsWorkspaceDataContextValue = {
   ) => Promise<PortfolioNarrativeState>;
   ensurePortfolioSummaries: () => Promise<Record<string, PortfolioProjectSummary>>;
   ensureProjectData: (projectId: string, options?: { force?: boolean }) => Promise<ProjectOkrData>;
+  fetchProjectDataSnapshot: (projectId: string) => Promise<ProjectOkrData>;
   ensureProjectSentiments: (
     projectId: string,
     keyResults: AgileKeyResult[]
   ) => Promise<AgileKeyResultSentimentAnalysis[]>;
   ensureProjects: () => Promise<AgileProject[]>;
+  invalidateKeyResultHistory: (keyResultIds: string[]) => void;
   invalidateProject: (projectId: string) => void;
   portfolioKrHistoryById: PortfolioKrHistoryCache;
   portfolioNarrativeCache: Record<string, PortfolioNarrativeState>;
@@ -326,6 +328,10 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
     return promise;
   }, []);
 
+  const fetchProjectDataSnapshot = useCallback((projectId: string) => {
+    return fetchOkrsProjectData(projectId);
+  }, []);
+
   const ensureProjectSentiments = useCallback(async (projectId: string, keyResults: AgileKeyResult[]) => {
     const cachedAnalyses = projectSentimentCacheRef.current[projectId];
     if (cachedAnalyses && cachedAnalyses.length === keyResults.length) {
@@ -493,7 +499,9 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
 
   const ensureKeyResultHistoryBulk = useCallback(async (keyResultIds: string[]) => {
     const uniqueIds = Array.from(new Set(keyResultIds.filter(Boolean)));
-    const missingIds = uniqueIds.filter((keyResultId) => !portfolioKrHistoryByIdRef.current[keyResultId]);
+    const missingIds = uniqueIds.filter(
+      (keyResultId) => portfolioKrHistoryByIdRef.current[keyResultId]?.status !== "ready"
+    );
 
     if (missingIds.length === 0) {
       return portfolioKrHistoryByIdRef.current;
@@ -671,6 +679,23 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
     setPortfolioNarrativeCache({});
   }, []);
 
+  const invalidateKeyResultHistory = useCallback((keyResultIds: string[]) => {
+    const keyResultIdSet = new Set(keyResultIds.filter(Boolean));
+
+    if (keyResultIdSet.size === 0) {
+      return;
+    }
+
+    const nextHistoryCache = { ...portfolioKrHistoryByIdRef.current };
+
+    for (const keyResultId of keyResultIdSet) {
+      delete nextHistoryCache[keyResultId];
+    }
+
+    portfolioKrHistoryByIdRef.current = nextHistoryCache;
+    setPortfolioKrHistoryById(nextHistoryCache);
+  }, []);
+
   const value = useMemo<OkrsWorkspaceDataContextValue>(
     () => ({
       cancelPortfolioSummaries,
@@ -678,8 +703,10 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
       ensurePortfolioNarrative,
       ensurePortfolioSummaries,
       ensureProjectData,
+      fetchProjectDataSnapshot,
       ensureProjectSentiments,
       ensureProjects,
+      invalidateKeyResultHistory,
       invalidateProject,
       portfolioKrHistoryById,
       portfolioNarrativeCache,
@@ -696,8 +723,10 @@ export function OkrsWorkspaceDataProvider({ children }: { children: React.ReactN
       ensurePortfolioNarrative,
       ensurePortfolioSummaries,
       ensureProjectData,
+      fetchProjectDataSnapshot,
       ensureProjectSentiments,
       ensureProjects,
+      invalidateKeyResultHistory,
       invalidateProject,
       portfolioKrHistoryById,
       portfolioNarrativeCache,

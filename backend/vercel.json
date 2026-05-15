@@ -89,6 +89,14 @@
       "destination": "/api/singular-agile/key-results"
     },
     {
+      "source": "/singular-agile/key-result-history",
+      "destination": "/api/singular-agile/key-result-history"
+    },
+    {
+      "source": "/singular-agile/key-result-history/bulk",
+      "destination": "/api/singular-agile/key-result-history-bulk"
+    },
+    {
       "source": "/singular-agile/objectives",
       "destination": "/api/singular-agile/objectives"
     },

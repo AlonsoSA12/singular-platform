@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { useToast } from "@/components/app-toasts";
 import {
   calculateTrustworthinessScoreFromProposal,
   createTrustworthinessAssistantWelcomeMessage,
@@ -76,12 +77,6 @@ type PendingPillarUpdate = {
   key: SuggestionPillarKey;
   label: string;
   nextValue: number;
-};
-
-type SaveSuccessToast = {
-  id: string;
-  message: string;
-  title: string;
 };
 
 type AgentActivity = {
@@ -846,6 +841,7 @@ function createWalkthroughDemoMessages(params: {
 }
 
 export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModalProps) {
+  const toast = useToast();
   const [draftMessage, setDraftMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [proposal, setProposal] = useState<TrustworthinessAssistantProposal | null>(null);
@@ -863,7 +859,6 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
   const [pillarUpdatePrompt, setPillarUpdatePrompt] = useState("");
   const [isSaveConfirmationOpen, setIsSaveConfirmationOpen] = useState(false);
   const [saveConfirmationError, setSaveConfirmationError] = useState<string | null>(null);
-  const [saveSuccessToast, setSaveSuccessToast] = useState<SaveSuccessToast | null>(null);
   const [streamingAssistantMessage, setStreamingAssistantMessage] = useState("");
   const [streamingDecisionTrace, setStreamingDecisionTrace] = useState<string[]>([]);
   const [showStreamingFallback, setShowStreamingFallback] = useState(false);
@@ -871,6 +866,7 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     useState<TrustworthinessAssistantRuntimeConfig | null>(null);
   const [runtimeConfigError, setRuntimeConfigError] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const respondingToastIdRef = useRef<number | null>(null);
   const isWalkthroughMode = props.walkthroughVariant === "chatbot";
   const isContextTriggerWalkthroughActive =
     isWalkthroughMode && props.walkthroughStepId === "chatbot-context-trigger";
@@ -944,7 +940,6 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
     setPillarUpdatePrompt("");
     setIsSaveConfirmationOpen(false);
     setSaveConfirmationError(null);
-    setSaveSuccessToast(null);
     setStreamingAssistantMessage("");
     setStreamingDecisionTrace([]);
     setShowStreamingFallback(false);
@@ -1086,18 +1081,29 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
   ]);
 
   useEffect(() => {
-    if (!saveSuccessToast) {
+    if (isResponding && respondingToastIdRef.current === null) {
+      respondingToastIdRef.current = toast.progress({
+        message: "Actualizando la propuesta del chat.",
+        persistent: true,
+        title: "Asistente revisando"
+      });
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      setSaveSuccessToast(null);
-    }, 2800);
+    if (!isResponding && respondingToastIdRef.current !== null) {
+      toast.dismiss(respondingToastIdRef.current);
+      respondingToastIdRef.current = null;
+    }
+  }, [isResponding, toast]);
 
+  useEffect(() => {
     return () => {
-      window.clearTimeout(timeoutId);
+      if (respondingToastIdRef.current !== null) {
+        toast.dismiss(respondingToastIdRef.current);
+        respondingToastIdRef.current = null;
+      }
     };
-  }, [saveSuccessToast]);
+  }, [toast]);
 
   useEffect(() => {
     if (!isWalkthroughMode) {
@@ -1688,8 +1694,8 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
       setIsSaveReady(false);
       setLastProposalChanged(false);
       setLastChangeSource("none");
-      setSaveSuccessToast({
-        id: createMessageId("save-toast"),
+      toast.success({
+        durationMs: 2800,
         message:
           ratingStatus === "Done"
             ? "Se guardaron puntajes, feedback, datos de IA y el status final quedó en Done."
@@ -2238,46 +2244,6 @@ export function TrustworthinessMockChatModal(props: TrustworthinessMockChatModal
                   >
                     Confirmar y enviar
                   </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-
-      {isResponding
-        ? createPortal(
-            <div
-              aria-live="polite"
-              className="tw-suggestion-toast-layer chat-action-toast-layer"
-              role="status"
-              style={{ zIndex: props.chatZIndex + 3 }}
-            >
-              <div className="tw-suggestion-notification is-progress chat-action-toast">
-                <span aria-hidden="true">TW</span>
-                <div className="tw-suggestion-notification-copy">
-                  <strong>Asistente revisando</strong>
-                  <p>Actualizando la propuesta del chat.</p>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-
-      {saveSuccessToast
-        ? createPortal(
-            <div
-              aria-live="polite"
-              className="tw-suggestion-toast-layer chat-action-toast-layer"
-              role="status"
-              style={{ zIndex: props.chatZIndex + 3 }}
-            >
-              <div className="tw-suggestion-notification chat-action-toast" key={saveSuccessToast.id}>
-                <span aria-hidden="true">OK</span>
-                <div className="tw-suggestion-notification-copy">
-                  <strong>{saveSuccessToast.title}</strong>
-                  <p>{saveSuccessToast.message}</p>
                 </div>
               </div>
             </div>,

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useToast, type AppToastDetail, type AppToastTone } from "@/components/app-toasts";
 import {
   CHAT_REVIEW_WIDTH_STORAGE_KEY,
   buildDetailAiSuggestions,
@@ -49,7 +50,6 @@ import { TrustworthinessMockChatModal } from "./mock-chat-modal";
 import {
   SuggestionDetailModal,
   TranscriptSideSheet,
-  TrustworthinessFloatingToasts,
   TrustworthinessSuggestionSideSheet
 } from "./overlays";
 import type {
@@ -60,10 +60,8 @@ import type {
   PeriodOption,
   SuggestionAppliedPoints,
   SuggestionCacheNotice,
-  SuggestionNotification,
   SuggestionPillarKey,
   TrustworthinessDraft,
-  TrustworthinessFloatingToast,
   TrustworthinessRatingStatus,
   TrustworthinessRecord,
   TrustworthinessResponse,
@@ -145,6 +143,22 @@ function getGenerationStageToastMessage(stage: TwGenerationStage) {
   }
 
   return `Paso ${stepIndex + 1} de ${TW_GENERATION_STEPS.length}: ${baseLabel}.`;
+}
+
+function buildGenerationToastDetails(progress: TwGenerationProgress): AppToastDetail[] {
+  return TW_GENERATION_STEPS.map((step) => {
+    const isError = progress.status === "error" && progress.errorStage === step.id;
+    const isCurrent = progress.status === "running" && progress.currentStage === step.id;
+    const isComplete =
+      progress.status === "success" || progress.completedStages.includes(step.id);
+
+    return {
+      description: isError ? progress.errorMessage ?? undefined : undefined,
+      id: step.id,
+      label: step.label,
+      status: isError ? "error" : isCurrent ? "current" : isComplete ? "complete" : "pending"
+    };
+  });
 }
 
 type SidePanelKey =
@@ -717,6 +731,7 @@ export function TrustworthinessWorkspace({
   walkthroughStepId = null,
   walkthroughVariant = null
 }: TrustworthinessWorkspaceProps) {
+  const toast = useToast();
   const selectorRef = useRef<HTMLDetailsElement | null>(null);
   const statusFilterRef = useRef<HTMLDivElement | null>(null);
   const detailShellRef = useRef<HTMLDivElement | null>(null);
@@ -732,9 +747,6 @@ export function TrustworthinessWorkspace({
   const chatbotWalkthroughHasOpenedRef = useRef(false);
   const suggestionGenerationRequestIdRef = useRef(0);
   const activeGenerationToastIdRef = useRef<number | null>(null);
-  const generationToastTimeoutsRef = useRef<Map<number, { closeTimeoutId: number; removeTimeoutId: number | null }>>(
-    new Map()
-  );
   const [periodOptions] = useState<PeriodOption[]>(() => createPeriods());
   const [hasLoadedStoredSelection, setHasLoadedStoredSelection] = useState(false);
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>(() =>
@@ -779,7 +791,6 @@ export function TrustworthinessWorkspace({
   );
   const [appliedSuggestionPoints, setAppliedSuggestionPoints] = useState<SuggestionAppliedPoints>({});
   const [suggestionCacheNotice, setSuggestionCacheNotice] = useState<SuggestionCacheNotice | null>(null);
-  const [suggestionNotification, setSuggestionNotification] = useState<SuggestionNotification | null>(null);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [isSuggestionLoading, setIsSuggestionLoading] = useState(false);
   const [isSuggestionSideSheetOpen, setIsSuggestionSideSheetOpen] = useState(false);
@@ -787,7 +798,6 @@ export function TrustworthinessWorkspace({
   const [twGenerationProgress, setTwGenerationProgress] = useState<TwGenerationProgress>(() =>
     createIdleTwGenerationProgress()
   );
-  const [generationToasts, setGenerationToasts] = useState<TrustworthinessFloatingToast[]>([]);
   const [drawerWidth, setDrawerWidth] = useState(() => clampDetailDrawerWidth(DETAIL_DRAWER_DEFAULT_WIDTH));
   const [chatWidth, setChatWidth] = useState(760);
   const sidePanelOrderRef = useRef(0);
@@ -815,20 +825,6 @@ export function TrustworthinessWorkspace({
   function getSidePanelZIndex(panelKey: SidePanelKey) {
     return SIDE_PANEL_BASE_Z_INDEX + sidePanelLayers[panelKey];
   }
-
-  useEffect(() => {
-    return () => {
-      for (const timeoutGroup of generationToastTimeoutsRef.current.values()) {
-        window.clearTimeout(timeoutGroup.closeTimeoutId);
-        if (timeoutGroup.removeTimeoutId !== null) {
-          window.clearTimeout(timeoutGroup.removeTimeoutId);
-        }
-      }
-
-      generationToastTimeoutsRef.current.clear();
-      activeGenerationToastIdRef.current = null;
-    };
-  }, []);
 
   useEffect(() => {
     try {
@@ -1060,7 +1056,6 @@ export function TrustworthinessWorkspace({
     setSuggestionDraftPoints((current) => (current === null ? current : null));
     setAppliedSuggestionPoints((current) => (isEmptyAppliedSuggestionPoints(current) ? current : {}));
     setSuggestionCacheNotice((current) => (current === null ? current : null));
-    setSuggestionNotification((current) => (current === null ? current : null));
     setSuggestionError((current) => (current === null ? current : null));
     setIsSuggestionSideSheetOpen((current) => (current ? false : current));
     setSelectedSuggestionPillar((current) => (current === null ? current : null));
@@ -1087,22 +1082,6 @@ export function TrustworthinessWorkspace({
       return areSuggestionDraftPointsEqual(current, nextDraftPoints) ? current : nextDraftPoints;
     });
   }, [twSuggestion]);
-
-  useEffect(() => {
-    if (!suggestionNotification) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setSuggestionNotification((current) =>
-        current?.id === suggestionNotification.id ? null : current
-      );
-    }, 2600);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [suggestionNotification]);
 
   useEffect(() => {
     const nextVisibility: Record<SidePanelKey, boolean> = {
@@ -1262,128 +1241,57 @@ export function TrustworthinessWorkspace({
     };
   }, []);
 
-  function clearGenerationToastTimeouts(toastId: number) {
-    const timeoutGroup = generationToastTimeoutsRef.current.get(toastId);
-
-    if (!timeoutGroup) {
-      return;
-    }
-
-    window.clearTimeout(timeoutGroup.closeTimeoutId);
-    if (timeoutGroup.removeTimeoutId !== null) {
-      window.clearTimeout(timeoutGroup.removeTimeoutId);
-    }
-    generationToastTimeoutsRef.current.delete(toastId);
-  }
-
-  function removeGenerationToast(toastId: number) {
-    clearGenerationToastTimeouts(toastId);
-    if (activeGenerationToastIdRef.current === toastId) {
-      activeGenerationToastIdRef.current = null;
-    }
-    setGenerationToasts((current) => current.filter((toast) => toast.id !== toastId));
-  }
-
-  function dismissGenerationToast(toastId: number) {
-    const timeoutGroup = generationToastTimeoutsRef.current.get(toastId);
-
-    if (timeoutGroup?.removeTimeoutId !== null) {
-      return;
-    }
-
-    setGenerationToasts((current) =>
-      current.map((toast) =>
-        toast.id === toastId
-          ? {
-              ...toast,
-              isClosing: true
-            }
-          : toast
-      )
-    );
-
-    const removeTimeoutId = window.setTimeout(() => {
-      removeGenerationToast(toastId);
-    }, 260);
-
-    if (timeoutGroup) {
-      generationToastTimeoutsRef.current.set(toastId, {
-        ...timeoutGroup,
-        removeTimeoutId
-      });
-    }
-  }
-
   function clearGenerationToasts() {
-    for (const timeoutGroup of generationToastTimeoutsRef.current.values()) {
-      window.clearTimeout(timeoutGroup.closeTimeoutId);
-      if (timeoutGroup.removeTimeoutId !== null) {
-        window.clearTimeout(timeoutGroup.removeTimeoutId);
-      }
+    if (activeGenerationToastIdRef.current !== null) {
+      toast.dismiss(activeGenerationToastIdRef.current);
     }
-
-    generationToastTimeoutsRef.current.clear();
     activeGenerationToastIdRef.current = null;
-    setGenerationToasts([]);
   }
 
   function upsertGenerationToast(
-    tone: TrustworthinessFloatingToast["tone"],
+    tone: AppToastTone,
     title: string | null,
-    message: string
+    message: string,
+    progress = twGenerationProgress
   ) {
     const activeToastId = activeGenerationToastIdRef.current;
+    const details = tone === "progress" ? buildGenerationToastDetails(progress) : undefined;
 
     if (activeToastId !== null) {
-      clearGenerationToastTimeouts(activeToastId);
-      setGenerationToasts((current) =>
-        current.map((toast) =>
-          toast.id === activeToastId
-            ? {
-                ...toast,
-                isClosing: false,
-                message,
-                title,
-                tone
-              }
-            : toast
-        )
-      );
+      toast.update(activeToastId, {
+        details,
+        message,
+        persistent: tone === "progress",
+        title,
+        tone
+      });
 
       return activeToastId;
     }
 
-    const toastId = Date.now() + Math.floor(Math.random() * 1000);
+    const toastId = toast[tone]({
+      details,
+      message,
+      persistent: tone === "progress",
+      title
+    });
     activeGenerationToastIdRef.current = toastId;
-
-    setGenerationToasts((current) => [
-      ...current,
-      {
-        id: toastId,
-        isClosing: false,
-        message,
-        title,
-        tone
-      }
-    ]);
 
     return toastId;
   }
 
   function finalizeGenerationToast(
-    tone: TrustworthinessFloatingToast["tone"],
+    tone: AppToastTone,
     title: string | null,
     message: string,
-    durationMs: number
+    durationMs: number,
+    progress = twGenerationProgress
   ) {
-    const toastId = upsertGenerationToast(tone, title, message);
-    const closeTimeoutId = window.setTimeout(() => {
-      dismissGenerationToast(toastId);
-    }, durationMs);
-
-    generationToastTimeoutsRef.current.set(toastId, {
-      closeTimeoutId,
-      removeTimeoutId: null
+    const toastId = upsertGenerationToast(tone, title, message, progress);
+    toast.update(toastId, {
+      details: buildGenerationToastDetails(progress),
+      durationMs,
+      persistent: false
     });
   }
 
@@ -1834,8 +1742,7 @@ export function TrustworthinessWorkspace({
             }
           : current
       );
-      setSuggestionNotification({
-        id: Date.now(),
+      toast.success({
         message: "Feedback generado con IA. Revísalo antes de guardar."
       });
     } catch (feedbackErrorValue) {
@@ -1883,7 +1790,6 @@ export function TrustworthinessWorkspace({
         isEmptyAppliedSuggestionPoints(current) ? current : {}
       );
       setSuggestionCacheNotice((current) => (current === null ? current : null));
-      setSuggestionNotification((current) => (current === null ? current : null));
       setSuggestionError((current) => (current === null ? current : null));
       setIsSuggestionSideSheetOpen((current) => (current ? false : current));
       setSelectedSuggestionPillar((current) => (current === null ? current : null));
@@ -2403,8 +2309,7 @@ export function TrustworthinessWorkspace({
             }
           : current
       );
-      setSuggestionNotification({
-        id: Date.now(),
+      toast.success({
         message: getManualSaveToastMessage(nextStatus)
       });
       setIsManualSaveConfirmationOpen(false);
@@ -2591,20 +2496,22 @@ export function TrustworthinessWorkspace({
 
     if (!targetRecord || !targetRecordSummary || !targetParticipantEmail || !targetPeriodCoverage) {
       const message = "No hay contexto suficiente para generar la sugerencia TW.";
-      setSuggestionError(message);
-      setTwGenerationProgress({
+      const errorProgress: TwGenerationProgress = {
         decisionTrace: [],
         completedStages: [],
         currentStage: null,
         errorMessage: message,
         errorStage: "validating_evaluation_data",
         status: "error"
-      });
+      };
+      setSuggestionError(message);
+      setTwGenerationProgress(errorProgress);
       finalizeGenerationToast(
         "error",
         "Proceso detenido",
         message,
-        3600
+        3600,
+        errorProgress
       );
       return;
     }
@@ -2635,11 +2542,13 @@ export function TrustworthinessWorkspace({
       setIsChatbotCoachingContextLoading(false);
       setChatbotRecordId(null);
     }
-    setTwGenerationProgress(createRunningTwGenerationProgress());
+    const initialProgress = createRunningTwGenerationProgress();
+    setTwGenerationProgress(initialProgress);
     upsertGenerationToast(
       "progress",
       "Generando sugerencia TW",
-      getGenerationStageToastMessage("validating_evaluation_data")
+      getGenerationStageToastMessage("validating_evaluation_data"),
+      initialProgress
     );
 
     const applyStage = (stage: TwGenerationStage) => {
@@ -2649,18 +2558,23 @@ export function TrustworthinessWorkspace({
         return;
       }
 
-      setTwGenerationProgress((current) => ({
-        decisionTrace: current.decisionTrace,
+      const nextProgress: TwGenerationProgress = {
+        decisionTrace: [],
         completedStages: getGenerationCompletedStages(stage),
         currentStage: stage,
         errorMessage: null,
         errorStage: null,
         status: "running"
+      };
+      setTwGenerationProgress((current) => ({
+        ...nextProgress,
+        decisionTrace: current.decisionTrace
       }));
       upsertGenerationToast(
         "progress",
         "Generando sugerencia TW",
-        getGenerationStageToastMessage(stage)
+        getGenerationStageToastMessage(stage),
+        nextProgress
       );
     };
 
@@ -2670,21 +2584,23 @@ export function TrustworthinessWorkspace({
       }
 
       const errorStage = stage ?? "validating_evaluation_data";
-      setTwSuggestion(null);
-      setSuggestionError(message);
-      setTwGenerationProgress({
+      const errorProgress: TwGenerationProgress = {
         decisionTrace: [],
         completedStages: getGenerationCompletedStages(errorStage),
         currentStage: errorStage,
         errorMessage: message,
         errorStage,
         status: "error"
-      });
+      };
+      setTwSuggestion(null);
+      setSuggestionError(message);
+      setTwGenerationProgress(errorProgress);
       finalizeGenerationToast(
         "error",
         "Proceso detenido",
         message,
-        4200
+        4200,
+        errorProgress
       );
     };
 
@@ -2711,14 +2627,15 @@ export function TrustworthinessWorkspace({
       setAppliedSuggestionPoints({});
       setTwSuggestion(suggestion);
       setSelectedSuggestionPillar(null);
-      setTwGenerationProgress({
+      const successProgress: TwGenerationProgress = {
         decisionTrace: [],
         completedStages: TW_GENERATION_STEPS.map((step) => step.id),
         currentStage: null,
         errorMessage: null,
         errorStage: null,
         status: "success"
-      });
+      };
+      setTwGenerationProgress(successProgress);
       if (options?.openChatOnSuccess) {
         if (successOptions?.demoContextResponse) {
           setChatbotCoachingContextError(null);
@@ -2728,7 +2645,8 @@ export function TrustworthinessWorkspace({
           upsertGenerationToast(
             "progress",
             "Preparando chat TW",
-            "Cargando reuniones para el contexto del chat."
+            "Cargando reuniones para el contexto del chat.",
+            successProgress
           );
 
           try {
@@ -2758,7 +2676,8 @@ export function TrustworthinessWorkspace({
           successOptions?.successTitle ?? "Chat listo",
           successOptions?.successMessage ??
             "El chat ya tiene la sugerencia TW y las reuniones como contexto.",
-          2800
+          2800,
+          successProgress
         );
         setIsSuggestionSideSheetOpen(false);
         setChatbotRecordId(targetRecord.id);
@@ -2769,7 +2688,8 @@ export function TrustworthinessWorkspace({
         "success",
         "Sugerencia lista",
         "La sugerencia TW ya está lista para revisión.",
-        2800
+        2800,
+        successProgress
       );
       setIsSuggestionSideSheetOpen(true);
     };
@@ -3007,8 +2927,7 @@ export function TrustworthinessWorkspace({
         suggestion: twSuggestion
       });
     }
-    setSuggestionNotification({
-      id: Date.now(),
+    toast.success({
       message: `${pillarLabel} aplicado al detalle.`
     });
   }
@@ -3046,8 +2965,7 @@ export function TrustworthinessWorkspace({
         suggestion: twSuggestion
       });
     }
-    setSuggestionNotification({
-      id: Date.now(),
+    toast.success({
       message: "Sugerencia TW aplicada al detalle."
     });
   }
@@ -3224,12 +3142,6 @@ export function TrustworthinessWorkspace({
         suggestionError={suggestionError}
         twSuggestion={twSuggestion}
         zIndex={getSidePanelZIndex("suggestion")}
-      />
-
-      <TrustworthinessFloatingToasts
-        generationToasts={generationToasts}
-        suggestionNotification={suggestionNotification}
-        twGenerationProgress={twGenerationProgress}
       />
 
       <SuggestionDetailModal

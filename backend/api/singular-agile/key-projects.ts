@@ -1,7 +1,33 @@
 import {
   createSingularAgileKeyProject,
+  listSingularAgileKeyProjectsByIds,
   updateSingularAgileKeyProject
 } from "../../src/singular-agile/key-projects.js";
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const recordIds = searchParams
+      .get("recordIds")
+      ?.split(",")
+      .map((recordId) => recordId.trim())
+      .filter(Boolean) ?? [];
+    const payload = await listSingularAgileKeyProjectsByIds(recordIds);
+
+    return Response.json(payload, { status: 200 });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "No fue posible consultar los Key Projects en Singular Agile.";
+
+    return Response.json(
+      {
+        ok: false,
+        message
+      },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request: Request) {
   try {

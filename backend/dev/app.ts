@@ -17,8 +17,13 @@ import { listAgileProjectsForCollaborator } from "../src/okrs/airtable-projects.
 import { createOkrBotReply, type OkrBotAction } from "../src/okrs/bot-assistant.js";
 import {
   createSingularAgileKeyProject,
+  listSingularAgileKeyProjectsByIds,
   updateSingularAgileKeyProject
 } from "../src/singular-agile/key-projects.js";
+import {
+  listSingularAgileKeyResultHistoryBulk,
+  updateSingularAgileKeyResultHistory
+} from "../src/singular-agile/key-result-history.js";
 import {
   createSingularAgileKeyResult,
   updateSingularAgileKeyResult
@@ -70,6 +75,10 @@ type AgileObjectivesQuery = {
 
 type AgileKeyProjectsQuery = {
   projectId?: string;
+};
+
+type SingularAgileKeyProjectsQuery = {
+  recordIds?: string;
 };
 
 type AgileKeyResultHistoryBulkBody = {
@@ -743,6 +752,12 @@ export function buildServer() {
     return reply.code(payload.created ? 201 : payload.status === "validation_failed" ? 400 : 500).send(payload);
   });
 
+  app.get<{ Querystring: SingularAgileKeyProjectsQuery }>("/singular-agile/key-projects", async (request) => {
+    const recordIds = request.query.recordIds?.split(",").map((recordId) => recordId.trim()).filter(Boolean) ?? [];
+
+    return listSingularAgileKeyProjectsByIds(recordIds);
+  });
+
   app.post<{ Body: CreateSingularAgileKeyResultBody }>("/singular-agile/key-results", async (request, reply) => {
     const payload = await createSingularAgileKeyResult(request.body);
 
@@ -759,6 +774,34 @@ export function buildServer() {
   app.patch<{ Body: UpdateSingularAgileKeyProjectBody }>("/singular-agile/key-projects", async (request, reply) => {
     const { recordId, ...fields } = request.body;
     const payload = await updateSingularAgileKeyProject(recordId, fields);
+
+    return reply.code(payload.updated ? 200 : payload.status === "validation_failed" ? 400 : 500).send(payload);
+  });
+
+  app.post<{ Body: AgileKeyResultHistoryBulkBody }>(
+    "/singular-agile/key-result-history/bulk",
+    async (request, reply) => {
+      const keyResultIds = Array.isArray(request.body.keyResultIds) ? request.body.keyResultIds : [];
+
+      if (keyResultIds.length === 0) {
+        return reply.code(400).send({
+          ok: false,
+          message: "La lista de Key Results es obligatoria."
+        });
+      }
+
+      const payload = await listSingularAgileKeyResultHistoryBulk(keyResultIds);
+
+      return reply.send({
+        ok: true,
+        ...payload
+      });
+    }
+  );
+
+  app.patch<{ Body: Record<string, unknown> }>("/singular-agile/key-result-history", async (request, reply) => {
+    const { recordId, ...fields } = request.body;
+    const payload = await updateSingularAgileKeyResultHistory(recordId, fields);
 
     return reply.code(payload.updated ? 200 : payload.status === "validation_failed" ? 400 : 500).send(payload);
   });

@@ -12,27 +12,51 @@ import type {
 import { useOkrsWorkspaceData } from "@/components/okrs-workspace-data-context";
 import type {
   AgileKeyProject,
+  AgileKeyProjectKeyResultSuggestion,
   AgileKeyResult,
   AgileKeyResultHistoryPoint,
   AgileKeyResultSentimentAnalysis,
+  SingularAgileKeyProjectLinkSnapshot,
   AgileObjective,
   AgileObjectiveHealthAnalysis,
   AgileProject,
   CreateAgileKeyProjectInput,
   CreateAgileKeyResultInput,
-  CreateAgileObjectiveInput
+  CreateAgileObjectiveInput,
+  SingularAgileKeyProjectUpdateInput,
+  SingularAgileKeyResultHistoryUpdateInput
 } from "@/lib/okrs";
 import {
   analyzeAgileKeyResultSentiments,
   analyzeAgileObjectiveHealth,
   generateAgileKeyResultDraft,
-  generateAgileObjectiveDraft
+  generateAgileObjectiveDraft,
+  fetchAgileKeyResultHistoryBulk,
+  fetchSingularAgileKeyResultHistoryBulk,
+  fetchSingularAgileKeyProjects,
+  suggestKeyResultsForKeyProject,
+  updateSingularAgileKeyProject,
+  updateSingularAgileKeyResultHistory
 } from "@/lib/okrs";
+import { useToast, type AppToastTone } from "@/components/app-toasts";
 
 type MainOkrTab = "okrs" | "key-results" | "portfolio-analysis";
 type OkrDetailTab = "overview" | "key-results" | "key-projects" | "stories";
 type NewOkrRecordType = "key-project" | "key-result" | "objective";
 type PortfolioTab = "summary" | "kr-trends";
+type ProjectToastHandler = (
+  tone: AppToastTone,
+  title: string | null,
+  message: string
+) => void;
+type OptimisticKeyProjectLink = {
+  keyResultIds: string[];
+  keyResultLabels: string[];
+  status: "pending" | "synced";
+};
+type KeyProjectUpdatedOptions = {
+  silent?: boolean;
+};
 
 const statusOptions: Array<{ label: string; value: "ALL" | NonNullable<AgileObjective["status"]> }> = [
   { value: "ALL", label: "ALL" },
@@ -62,6 +86,7 @@ const updateObjectiveWebhookUrl =
 const updateKeyResultWebhookUrl =
   "https://dev.webhooks.singular-innovation.com/webhook/2034dfef-2a50-4341-825c-3099aee45847";
 const objectiveSyncPollDelays = [5000, 5000, 10000, 15000];
+const keyResultFoundationSyncPollDelays = [2000, 5000, 10000, 15000];
 
 type ObjectiveSyncStatus = {
   objectiveTitle: string;
@@ -106,6 +131,10 @@ function formatNumberValue(value: number | null) {
   return value === null ? "Not set" : String(value);
 }
 
+function formatOneDecimalValue(value: number | null) {
+  return value === null ? "Not set" : value.toFixed(1);
+}
+
 function isKeyResultComplete(keyResult: AgileKeyResult) {
   return normalizeProgress(keyResult.progress) >= 100 || keyResult.status === "Achieved" || keyResult.status === "Done";
 }
@@ -129,6 +158,58 @@ function getObjectiveKeyResults(objective: AgileObjective): AgileKeyResult[] {
     targetValue: null,
     title: `Linked Key Result ${index + 1}`
   }));
+}
+
+function getAllObjectiveKeyResults(objectives: AgileObjective[]) {
+  return objectives.flatMap((objective) =>
+    getObjectiveKeyResults(objective).map((keyResult) => ({
+      keyResult,
+      objective
+    }))
+  );
+}
+
+function getKeyResultLinkId(keyResult: AgileKeyResult) {
+  return keyResult.sourceRecordId || keyResult.id;
+}
+
+function getKeyResultDisplayTitle(keyResult: AgileKeyResult) {
+  return keyResult.title.trim() || keyResult.displayName?.trim() || keyResult.id;
+}
+
+function findKeyResultDetailElement(keyResultId: string) {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-key-result-detail-id]")).find(
+    (element) => element.dataset.keyResultDetailId === keyResultId
+  ) ?? null;
+}
+
+function keyProjectHasKeyResult(keyProject: AgileKeyProject, keyResult: AgileKeyResult) {
+  const keyResultIds = keyProject.keyResultIds ?? [];
+  const keyResultLabels = (keyProject.keyResultLabels ?? []).map((label) => label.toLowerCase());
+  const linkId = getKeyResultLinkId(keyResult);
+  const displayTitle = getKeyResultDisplayTitle(keyResult).toLowerCase();
+
+  return (
+    keyResultIds.includes(keyResult.id) ||
+    keyResultIds.includes(keyResult.sourceRecordId) ||
+    keyResultIds.includes(linkId) ||
+    keyResultLabels.includes(keyResult.title.toLowerCase()) ||
+    keyResultLabels.includes(displayTitle) ||
+    keyResultLabels.includes(keyResult.code.toLowerCase())
+  );
+}
+
+function getKeyProjectRelatedKeyResultLabel(
+  keyProject: AgileKeyProject,
+  projectKeyResults: Array<{ keyResult: AgileKeyResult; objective: AgileObjective }>
+) {
+  const matchedKeyResult = projectKeyResults.find(({ keyResult }) => keyProjectHasKeyResult(keyProject, keyResult));
+
+  if (matchedKeyResult) {
+    return getKeyResultDisplayTitle(matchedKeyResult.keyResult);
+  }
+
+  return keyProject.keyResultLabels?.[0] || "";
 }
 
 function computeObjectiveProgress(objective: AgileObjective) {
@@ -205,6 +286,67 @@ function formatHistoryMetricValue(value: number | null) {
   });
 }
 
+function shouldNormalizeMixedHistoryPercentValues(values: number[]) {
+  return values.some((value) => Math.abs(value) > 10) && values.some((value) => Math.abs(value) > 0 && Math.abs(value) <= 1);
+}
+
+function normalizeHistoryChartValue(value: number, shouldNormalizeMixedPercentValues: boolean) {
+  return shouldNormalizeMixedPercentValues && Math.abs(value) <= 1 ? value * 100 : value;
+}
+
+function formatHistoryChartValue(value: number, shouldNormalizeMixedPercentValues: boolean) {
+  return formatHistoryMetricValue(normalizeHistoryChartValue(value, shouldNormalizeMixedPercentValues));
+}
+
+function getHistoryPointNumberLabel(point: AgileKeyResultHistoryPoint) {
+  return point.no !== null ? `History #${point.no}` : point.name || point.id;
+}
+
+function getHistoryCreatedTime(point: AgileKeyResultHistoryPoint) {
+  const parsedTime = parseHistoryDateValue(point.created);
+
+  return parsedTime;
+}
+
+function formatHistoryCreatedLabel(point: AgileKeyResultHistoryPoint) {
+  const createdTime = getHistoryCreatedTime(point);
+
+  if (createdTime !== null) {
+    return formatHistoryDateLabel(point.created);
+  }
+
+  return point.created || "";
+}
+
+function formatHistoryCreatedTooltipLabel(point: AgileKeyResultHistoryPoint) {
+  const createdTime = getHistoryCreatedTime(point);
+
+  if (createdTime !== null) {
+    return formatDateTimeValue(point.created);
+  }
+
+  return point.created || "Not set";
+}
+
+function getHistoryPointTooltip(input: {
+  point: AgileKeyResultHistoryPoint;
+  serie: { key: "currentValue" | "initialValue" | "targetValue"; label: string };
+  shouldNormalizeMixedPercentValues: boolean;
+  value: number;
+}) {
+  const { point, serie, shouldNormalizeMixedPercentValues, value } = input;
+  const lines = [
+    `${serie.label}: ${formatHistoryChartValue(value, shouldNormalizeMixedPercentValues)}`,
+    `Created: ${formatHistoryCreatedTooltipLabel(point)}`,
+    point.targetDate ? `Target date: ${formatHistoryDateLabel(point.targetDate)}` : "",
+    point.status ? `Status: ${point.status}` : "",
+    `Initial ${formatHistoryMetricValue(point.initialValue)} · Current ${formatHistoryMetricValue(point.currentValue)}`,
+    `Target ${formatHistoryMetricValue(point.targetValue)}`
+  ];
+
+  return lines.filter(Boolean).join("\n");
+}
+
 function parseHistoryDateValue(value: string) {
   if (!value) {
     return null;
@@ -230,8 +372,10 @@ function formatHistoryDateLabel(value: string) {
 }
 
 function getHistoryAxisLabel(point: AgileKeyResultHistoryPoint, index: number) {
-  if (point.targetDate) {
-    return formatHistoryDateLabel(point.targetDate);
+  const createdLabel = formatHistoryCreatedLabel(point);
+
+  if (createdLabel) {
+    return createdLabel;
   }
 
   if (point.quarter) {
@@ -242,11 +386,55 @@ function getHistoryAxisLabel(point: AgileKeyResultHistoryPoint, index: number) {
 }
 
 function getHistoryAxisContextLabel(point: AgileKeyResultHistoryPoint) {
-  if (point.targetDate && point.quarter) {
+  if (point.quarter) {
     return point.quarter;
   }
 
   return "";
+}
+
+function getHistoryListSortValue(point: AgileKeyResultHistoryPoint) {
+  const createdTime = Date.parse(point.created);
+
+  if (Number.isFinite(createdTime)) {
+    return createdTime;
+  }
+
+  const targetTime = parseHistoryDateValue(point.targetDate);
+
+  if (targetTime !== null) {
+    return targetTime;
+  }
+
+  return point.no ?? 0;
+}
+
+function getHistoryListDateLabel(point: AgileKeyResultHistoryPoint) {
+  if (point.created) {
+    return formatDateTimeValue(point.created);
+  }
+
+  if (point.targetDate) {
+    return formatHistoryDateLabel(point.targetDate);
+  }
+
+  return "No date";
+}
+
+function getHistorySignature(history: AgileKeyResultHistoryPoint[]) {
+  return history
+    .map((point) =>
+      [
+        point.id,
+        point.sourceId,
+        point.created,
+        point.initialValue ?? "",
+        point.currentValue ?? "",
+        point.targetValue ?? "",
+        point.status
+      ].join(":")
+    )
+    .join("|");
 }
 
 function getMetricStatusMeta(metricStatus: AgileKeyResultSentimentAnalysis["metricStatus"]) {
@@ -849,34 +1037,39 @@ function formatKeyResultNumberValue(value: number | null) {
 function buildKeyResultUpdatePayload({
   keyResult,
   objective,
+  originalKeyResult,
   project
 }: {
   keyResult: AgileKeyResult;
   objective: AgileObjective;
+  originalKeyResult?: AgileKeyResult | null;
   project: AgileProject | null;
 }) {
   const sourceProjectId = project?.sourceRecordId?.trim() ?? "";
   const sourceObjectiveId = objective.recordId.trim();
   const sourceKeyResultId = keyResult.sourceRecordId.trim();
+  const currentTitle = keyResult.title.trim();
+  const originalTitle = originalKeyResult?.title.trim() ?? currentTitle;
+  const shouldUpdateTitle = currentTitle.length > 0 && currentTitle !== originalTitle;
+  const keyResultFields = {
+    "Current Value": formatKeyResultNumberValue(keyResult.currentValue),
+    "Explanation": keyResult.explanation.trim(),
+    "Initial Value": formatKeyResultNumberValue(keyResult.initialValue),
+    "Metric": keyResult.metric.trim(),
+    "Objetive": sourceObjectiveId,
+    "Project": sourceProjectId,
+    "Status": keyResult.status.trim(),
+    "Target Date": keyResult.targetDate.trim(),
+    "Target Value": formatKeyResultNumberValue(keyResult.targetValue),
+    foundationRecordId: keyResult.id,
+    id: sourceKeyResultId,
+    sourceRecordId: sourceKeyResultId
+  };
 
   return {
     action: "updateKeyResult",
     executionMode: "production",
-    keyResult: {
-      "Current Value": formatKeyResultNumberValue(keyResult.currentValue),
-      "Explanation": keyResult.explanation.trim(),
-      "Initial Value": formatKeyResultNumberValue(keyResult.initialValue),
-      "Key Result": keyResult.title.trim(),
-      "Metric": keyResult.metric.trim(),
-      "Objetive": sourceObjectiveId,
-      "Project": sourceProjectId,
-      "Status": keyResult.status.trim(),
-      "Target Date": keyResult.targetDate.trim(),
-      "Target Value": formatKeyResultNumberValue(keyResult.targetValue),
-      foundationRecordId: keyResult.id,
-      id: sourceKeyResultId,
-      sourceRecordId: sourceKeyResultId
-    },
+    keyResult: shouldUpdateTitle ? { ...keyResultFields, "Key Result": currentTitle } : keyResultFields,
     keyResultId: sourceKeyResultId,
     objective: {
       foundationRecordId: objective.id,
@@ -1058,7 +1251,51 @@ function parseNullableNumber(value: string) {
   return Number.isFinite(parsedValue) ? parsedValue : null;
 }
 
-function KeyResultHistoryChart({ points }: { points: AgileKeyResultHistoryPoint[] }) {
+function formatHistoryEditInputValue(value: number | null) {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+type KeyResultHistoryEditableValues = Pick<
+  SingularAgileKeyResultHistoryUpdateInput,
+  "currentValue" | "initialValue" | "targetValue"
+>;
+
+function areNullableHistoryNumbersEqual(left: number | null, right: number | null | undefined) {
+  if (right === undefined) {
+    return true;
+  }
+
+  if (left === null || right === null) {
+    return left === right;
+  }
+
+  return Math.abs(left - right) < 0.005;
+}
+
+type KeyResultSyncStatus = {
+  keyResultId: string;
+  message: string;
+  status: "synced" | "syncing" | "timeout";
+};
+
+type KeyResultHistoryUiResponse = {
+  history: AgileKeyResultHistoryPoint[];
+  sentimentAnalysis?: AgileKeyResultSentimentAnalysis;
+  type: "key_result_history";
+};
+
+function KeyResultHistoryChart({
+  points,
+  variant = "full"
+}: {
+  points: AgileKeyResultHistoryPoint[];
+  variant?: "compact" | "full";
+}) {
+  const [activeTooltip, setActiveTooltip] = useState<{
+    lines: string[];
+    x: number;
+    y: number;
+  } | null>(null);
   const series = [
     { key: "initialValue", label: "Initial", color: "#8fb1ff" },
     { key: "currentValue", label: "Current", color: "#2dd4a7" },
@@ -1079,28 +1316,34 @@ function KeyResultHistoryChart({ points }: { points: AgileKeyResultHistoryPoint[
     );
   }
 
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
+  const shouldNormalizeMixedPercentValues = shouldNormalizeMixedHistoryPercentValues(values);
+  const chartValues = values.map((value) => normalizeHistoryChartValue(value, shouldNormalizeMixedPercentValues));
+  const minValue = Math.min(...chartValues);
+  const maxValue = Math.max(...chartValues);
   const padding = maxValue === minValue ? Math.max(Math.abs(maxValue) * 0.15, 0.1) : (maxValue - minValue) * 0.12;
   const yMin = minValue - padding;
   const yMax = maxValue + padding;
   const width = 640;
-  const height = 300;
+  const isCompact = variant === "compact";
+  const height = isCompact ? 230 : 300;
   const chartLeft = 52;
   const chartRight = 28;
-  const chartTop = 24;
-  const chartBottom = 64;
+  const chartTop = isCompact ? 20 : 24;
+  const chartBottom = isCompact ? 58 : 64;
   const plotWidth = width - chartLeft - chartRight;
   const plotHeight = height - chartTop - chartBottom;
-  const timelineValues = points.map((point) => parseHistoryDateValue(point.targetDate));
+  const timelineValues = points.map(getHistoryCreatedTime);
   const validTimelineValues = timelineValues.filter((value): value is number => value !== null);
   const uniqueTimelineValues = Array.from(new Set(validTimelineValues));
-  const shouldUseTimelineScale = uniqueTimelineValues.length > 1 && validTimelineValues.length === points.length;
+  const shouldUseTimelineScale =
+    uniqueTimelineValues.length > 1 &&
+    uniqueTimelineValues.length === points.length &&
+    validTimelineValues.length === points.length;
   const timelineMin = shouldUseTimelineScale ? Math.min(...validTimelineValues) : 0;
   const timelineMax = shouldUseTimelineScale ? Math.max(...validTimelineValues) : 0;
   const xForPoint = (point: AgileKeyResultHistoryPoint, index: number) => {
     if (shouldUseTimelineScale) {
-      const parsedTime = parseHistoryDateValue(point.targetDate) ?? timelineMin;
+      const parsedTime = getHistoryCreatedTime(point) ?? timelineMin;
 
       return chartLeft + ((parsedTime - timelineMin) / (timelineMax - timelineMin)) * plotWidth;
     }
@@ -1111,7 +1354,7 @@ function KeyResultHistoryChart({ points }: { points: AgileKeyResultHistoryPoint[
   const yTicks = [yMin, (yMin + yMax) / 2, yMax];
 
   return (
-    <div className="client-okrs-history-chart">
+    <div className={`client-okrs-history-chart${isCompact ? " is-compact" : ""}`}>
       <div className="client-okrs-history-legend">
         {series.map((serie) => (
           <span key={serie.key}>
@@ -1119,7 +1362,7 @@ function KeyResultHistoryChart({ points }: { points: AgileKeyResultHistoryPoint[
             {serie.label}
           </span>
         ))}
-        <small>{shouldUseTimelineScale ? "Timeline by Target Date" : "Timeline by history sequence"}</small>
+        <small>{shouldUseTimelineScale ? "Timeline by record creation" : "Timeline by history sequence"}</small>
       </div>
       <svg aria-label="Key Result history chart" role="img" viewBox={`0 0 ${width} ${height}`}>
         <title>Key Result history by Initial, Current, and Target values</title>
@@ -1155,12 +1398,39 @@ function KeyResultHistoryChart({ points }: { points: AgileKeyResultHistoryPoint[
         {series.map((serie) => {
           const coordinates = points
             .map((point, index) => {
-              const value = point[serie.key];
-              return typeof value === "number" && Number.isFinite(value)
-                ? { x: xForPoint(point, index), y: yForValue(value), value }
+              const rawValue = point[serie.key];
+              const value =
+                typeof rawValue === "number" && Number.isFinite(rawValue)
+                  ? normalizeHistoryChartValue(rawValue, shouldNormalizeMixedPercentValues)
+                  : rawValue;
+              return typeof rawValue === "number" && Number.isFinite(rawValue) && typeof value === "number" && Number.isFinite(value)
+                ? {
+                    point,
+                    rawValue,
+                    tooltip: getHistoryPointTooltip({
+                      point,
+                      serie,
+                      shouldNormalizeMixedPercentValues,
+                      value: rawValue
+                    }),
+                    x: xForPoint(point, index),
+                    y: yForValue(value),
+                    value
+                  }
                 : null;
             })
-            .filter((point): point is { x: number; y: number; value: number } => Boolean(point));
+            .filter(
+              (
+                point
+              ): point is {
+                point: AgileKeyResultHistoryPoint;
+                rawValue: number;
+                tooltip: string;
+                x: number;
+                y: number;
+                value: number;
+              } => Boolean(point)
+            );
           const pathData = coordinates.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
 
           return (
@@ -1169,82 +1439,87 @@ function KeyResultHistoryChart({ points }: { points: AgileKeyResultHistoryPoint[
                 <path className="client-okrs-history-line" d={pathData} style={{ stroke: serie.color }} />
               ) : null}
               {coordinates.map((point) => (
-                <circle className="client-okrs-history-point" cx={point.x} cy={point.y} key={`${serie.key}-${point.x}-${point.y}`} r="4" style={{ fill: serie.color }} />
+                <circle
+                  aria-label={point.tooltip}
+                  className="client-okrs-history-point"
+                  cx={point.x}
+                  cy={point.y}
+                  key={`${serie.key}-${point.point.id}-${point.x}-${point.y}`}
+                  onBlur={() => setActiveTooltip(null)}
+                  onFocus={() =>
+                    setActiveTooltip({
+                      lines: point.tooltip.split("\n"),
+                      x: point.x,
+                      y: point.y
+                    })
+                  }
+                  onMouseEnter={() =>
+                    setActiveTooltip({
+                      lines: point.tooltip.split("\n"),
+                      x: point.x,
+                      y: point.y
+                    })
+                  }
+                  onMouseLeave={() => setActiveTooltip(null)}
+                  r={isCompact ? "4.5" : "4"}
+                  style={{ fill: serie.color }}
+                  tabIndex={0}
+                />
               ))}
             </g>
           );
         })}
+        {activeTooltip ? (
+          <foreignObject
+            className="client-okrs-history-tooltip-foreign"
+            height="112"
+            width="236"
+            x={Math.min(Math.max(activeTooltip.x + 10, chartLeft), width - 246)}
+            y={Math.max(activeTooltip.y - 88, chartTop)}
+          >
+            <div className="client-okrs-history-tooltip">
+              {activeTooltip.lines.map((line, index) => (
+                <span className={index === 0 ? "is-primary" : undefined} key={`${line}-${index}`}>
+                  {line}
+                </span>
+              ))}
+            </div>
+          </foreignObject>
+        ) : null}
       </svg>
     </div>
   );
 }
 
-function KeyResultHistoryPanel({
-  initialHistory,
-  keyResult,
-  objective,
-  onClose,
-  sentimentAnalysis
+function KeyResultHistoryUiResponseView({
+  compact = false,
+  onUpdateHistoryPoint,
+  showFilters = false,
+  showList = false,
+  showSentiment = false,
+  showSummary = false,
+  uiResponse
 }: {
-  initialHistory?: AgileKeyResultHistoryPoint[];
-  keyResult: AgileKeyResult;
-  objective: AgileObjective;
-  onClose: () => void;
-  sentimentAnalysis?: AgileKeyResultSentimentAnalysis;
+  compact?: boolean;
+  onUpdateHistoryPoint?: (recordId: string, values: KeyResultHistoryEditableValues) => Promise<void>;
+  showFilters?: boolean;
+  showList?: boolean;
+  showSentiment?: boolean;
+  showSummary?: boolean;
+  uiResponse: KeyResultHistoryUiResponse;
 }) {
-  const { ensureKeyResultHistoryBulk } = useOkrsWorkspaceData();
-  const [history, setHistory] = useState<AgileKeyResultHistoryPoint[]>(initialHistory ?? []);
-  const [isLoading, setIsLoading] = useState(!initialHistory);
-  const [error, setError] = useState<string | null>(null);
   const [quarterFilter, setQuarterFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadHistory() {
-      if (initialHistory) {
-        setHistory(initialHistory);
-        setQuarterFilter("ALL");
-        setStatusFilter("ALL");
-        setError(null);
-        setIsLoading(false);
-        return;
-      }
-
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const historyCache = await ensureKeyResultHistoryBulk([keyResult.id]);
-
-        if (isMounted) {
-          const cachedHistory = historyCache[keyResult.id];
-          setHistory(cachedHistory?.history ?? []);
-          setQuarterFilter("ALL");
-          setStatusFilter("ALL");
-          setError(cachedHistory?.error ?? null);
-        }
-      } catch (historyError) {
-        if (isMounted) {
-          setHistory([]);
-          setError(historyError instanceof Error ? historyError.message : "No fue posible consultar el historico.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    void loadHistory();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [ensureKeyResultHistoryBulk, initialHistory, keyResult.id]);
-
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [historyEditValues, setHistoryEditValues] = useState({
+    currentValue: "",
+    initialValue: "",
+    targetValue: ""
+  });
+  const [historyEditError, setHistoryEditError] = useState<string | null>(null);
+  const [savingHistoryId, setSavingHistoryId] = useState<string | null>(null);
+  const history = uiResponse.history;
+  const sentimentAnalysis = uiResponse.sentimentAnalysis;
   const quarterOptions = useMemo(
     () => ["ALL", ...Array.from(new Set(history.map((point) => point.quarter).filter(Boolean)))],
     [history]
@@ -1268,9 +1543,436 @@ function KeyResultHistoryPanel({
       }),
     [history, quarterFilter, statusFilter]
   );
+  const visibleHistoryList = useMemo(
+    () =>
+      [...filteredHistory].sort((left, right) => {
+        const sortDiff = getHistoryListSortValue(right) - getHistoryListSortValue(left);
+
+        if (sortDiff !== 0) {
+          return sortDiff;
+        }
+
+        return (right.no ?? 0) - (left.no ?? 0);
+      }),
+    [filteredHistory]
+  );
   const latestPoint = filteredHistory.at(-1) ?? history.at(-1) ?? null;
+
+  function startHistoryEdit(point: AgileKeyResultHistoryPoint) {
+    setEditingHistoryId(point.id);
+    setHistoryEditError(null);
+    setHistoryEditValues({
+      currentValue: formatHistoryEditInputValue(point.currentValue),
+      initialValue: formatHistoryEditInputValue(point.initialValue),
+      targetValue: formatHistoryEditInputValue(point.targetValue)
+    });
+  }
+
+  async function submitHistoryEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingHistoryId || !onUpdateHistoryPoint) {
+      return;
+    }
+
+    const editingPoint = history.find((point) => point.id === editingHistoryId);
+
+    if (!editingPoint) {
+      setHistoryEditError("No se encontró el record de histórico que estás editando.");
+      return;
+    }
+
+    const parsedValues = {
+      currentValue: parseNullableNumber(historyEditValues.currentValue),
+      initialValue: parseNullableNumber(historyEditValues.initialValue),
+      targetValue: parseNullableNumber(historyEditValues.targetValue)
+    };
+    const values: KeyResultHistoryEditableValues = {};
+
+    if (!areNullableHistoryNumbersEqual(editingPoint.initialValue, parsedValues.initialValue)) {
+      values.initialValue = parsedValues.initialValue;
+    }
+
+    if (!areNullableHistoryNumbersEqual(editingPoint.currentValue, parsedValues.currentValue)) {
+      values.currentValue = parsedValues.currentValue;
+    }
+
+    if (!areNullableHistoryNumbersEqual(editingPoint.targetValue, parsedValues.targetValue)) {
+      values.targetValue = parsedValues.targetValue;
+    }
+
+    if (Object.keys(values).length === 0) {
+      setEditingHistoryId(null);
+      setHistoryEditError(null);
+      return;
+    }
+
+    setSavingHistoryId(editingHistoryId);
+    setHistoryEditError(null);
+
+    try {
+      await onUpdateHistoryPoint(editingPoint.id, values);
+      setEditingHistoryId(null);
+    } catch (error) {
+      setHistoryEditError(error instanceof Error ? error.message : "No fue posible actualizar el histórico.");
+    } finally {
+      setSavingHistoryId(null);
+    }
+  }
+
+  if (history.length === 0) {
+    return (
+      <article className="client-okrs-history-state">
+        <strong>No history yet</strong>
+        <p>This Key Result does not have historical snapshots.</p>
+      </article>
+    );
+  }
+
+  return (
+    <div className={`client-okrs-history-ui-response${compact ? " is-compact" : ""}`}>
+      {showSentiment && sentimentAnalysis ? (
+        <section className={`client-okrs-history-sentiment ${getMetricStatusMeta(sentimentAnalysis.metricStatus).className}`}>
+          <div>
+            <span>Metric Status</span>
+            <strong>{sentimentAnalysis.metricStatus}</strong>
+          </div>
+          <p>{sentimentAnalysis.reason}</p>
+          <small>{sentimentAnalysis.recommendedAction}</small>
+        </section>
+      ) : null}
+
+      {showFilters ? (
+        <div className="client-okrs-history-filters">
+          <label>
+            <span>Quarter</span>
+            <select onChange={(event) => setQuarterFilter(event.target.value)} value={quarterFilter}>
+              {quarterOptions.map((quarter) => (
+                <option key={quarter} value={quarter}>
+                  {quarter === "ALL" ? "All" : quarter}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status === "ALL" ? "All" : status}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
+      {showSummary ? (
+        <div className="client-okrs-history-summary">
+          <div>
+            <span>Initial</span>
+            <strong>{formatHistoryMetricValue(latestPoint?.initialValue ?? null)}</strong>
+          </div>
+          <div>
+            <span>Current</span>
+            <strong>{formatHistoryMetricValue(latestPoint?.currentValue ?? null)}</strong>
+          </div>
+          <div>
+            <span>Target</span>
+            <strong>{formatHistoryMetricValue(latestPoint?.targetValue ?? null)}</strong>
+          </div>
+        </div>
+      ) : null}
+
+      <KeyResultHistoryChart points={filteredHistory} variant={compact ? "compact" : "full"} />
+
+      {showList ? (
+        <div className="client-okrs-history-list">
+          {visibleHistoryList.map((point, index) => (
+            <article className={editingHistoryId === point.id ? "is-editing" : ""} key={point.id}>
+              <div className="client-okrs-history-list-head">
+                <div>
+                  <strong>{getHistoryAxisLabel(point, index)}</strong>
+                  <span>{[getHistoryAxisContextLabel(point), point.status || "No status"].filter(Boolean).join(" · ")}</span>
+                </div>
+                {onUpdateHistoryPoint ? (
+                  <button
+                    className="client-okrs-history-edit-button"
+                    disabled={savingHistoryId !== null}
+                    onClick={() => startHistoryEdit(point)}
+                    type="button"
+                  >
+                    Edit
+                  </button>
+                ) : null}
+              </div>
+              {editingHistoryId === point.id ? (
+                <form className="client-okrs-history-edit-form" onSubmit={submitHistoryEdit}>
+                  <label>
+                    <span>Initial</span>
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        setHistoryEditValues((current) => ({ ...current, initialValue: event.target.value }))
+                      }
+                      value={historyEditValues.initialValue}
+                    />
+                  </label>
+                  <label>
+                    <span>Current</span>
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        setHistoryEditValues((current) => ({ ...current, currentValue: event.target.value }))
+                      }
+                      value={historyEditValues.currentValue}
+                    />
+                  </label>
+                  <label>
+                    <span>Target</span>
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        setHistoryEditValues((current) => ({ ...current, targetValue: event.target.value }))
+                      }
+                      value={historyEditValues.targetValue}
+                    />
+                  </label>
+                  {historyEditError ? <p className="client-okrs-history-edit-error">{historyEditError}</p> : null}
+                  <div className="client-okrs-history-edit-actions">
+                    <button
+                      className="client-okrs-app-confirm-secondary"
+                      disabled={savingHistoryId === point.id}
+                      onClick={() => {
+                        setEditingHistoryId(null);
+                        setHistoryEditError(null);
+                      }}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    <button className="client-okrs-app-confirm-primary" disabled={savingHistoryId === point.id} type="submit">
+                      {savingHistoryId === point.id ? "Saving" : "Save"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <p>
+                    Fecha {getHistoryListDateLabel(point)} · Initial {formatHistoryMetricValue(point.initialValue)} · Current {formatHistoryMetricValue(point.currentValue)} · Target {formatHistoryMetricValue(point.targetValue)}
+                  </p>
+                </>
+              )}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function KeyResultHistoryPanel({
+  initialHistory,
+  keyResult,
+  objective,
+  onClose,
+  onHistoryChanged,
+  onLatestValuesChanged,
+  onToast,
+  sentimentAnalysis
+}: {
+  initialHistory?: AgileKeyResultHistoryPoint[];
+  keyResult: AgileKeyResult;
+  objective: AgileObjective;
+  onClose: () => void;
+  onHistoryChanged?: (history: AgileKeyResultHistoryPoint[]) => void;
+  onLatestValuesChanged?: (values: KeyResultHistoryEditableValues) => void;
+  onToast?: ProjectToastHandler;
+  sentimentAnalysis?: AgileKeyResultSentimentAnalysis;
+}) {
+  const { ensureKeyResultHistoryBulk } = useOkrsWorkspaceData();
+  const [history, setHistory] = useState<AgileKeyResultHistoryPoint[]>(initialHistory ?? []);
+  const [isLoading, setIsLoading] = useState(!initialHistory);
+  const [error, setError] = useState<string | null>(null);
+  const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
+  const historySignatureRef = useRef(getHistorySignature(initialHistory ?? []));
+  const loadedSingularSourceIdRef = useRef<string | null>(null);
+  const onHistoryChangedRef = useRef(onHistoryChanged);
+
+  useEffect(() => {
+    onHistoryChangedRef.current = onHistoryChanged;
+  }, [onHistoryChanged]);
+
+  function applyHistory(nextHistory: AgileKeyResultHistoryPoint[], options?: { notifyParent?: boolean }) {
+    const nextSignature = getHistorySignature(nextHistory);
+
+    if (historySignatureRef.current === nextSignature) {
+      return false;
+    }
+
+    historySignatureRef.current = nextSignature;
+    setHistory(nextHistory);
+
+    if (options?.notifyParent) {
+      onHistoryChangedRef.current?.(nextHistory);
+    }
+
+    return true;
+  }
+
+  useEffect(() => {
+    loadedSingularSourceIdRef.current = null;
+    const nextHistory = initialHistory ?? [];
+
+    historySignatureRef.current = getHistorySignature(nextHistory);
+    setHistory(nextHistory);
+    setError(null);
+    setIsLoading(!initialHistory);
+  }, [initialHistory, keyResult.id]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const sourceKeyResultId = keyResult.sourceRecordId.trim();
+
+    if (sourceKeyResultId.length === 0) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    if (loadedSingularSourceIdRef.current === sourceKeyResultId) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    loadedSingularSourceIdRef.current = sourceKeyResultId;
+    setIsLoading(true);
+    setError(null);
+
+    async function loadSingularHistory() {
+      try {
+        const singularHistoryPayload = await fetchSingularAgileKeyResultHistoryBulk([sourceKeyResultId]);
+        const singularHistory = singularHistoryPayload.historyByKeyResultId[sourceKeyResultId] ?? [];
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (singularHistory.length > 0) {
+          applyHistory(singularHistory, { notifyParent: true });
+          setError(null);
+          return;
+        }
+
+        const historyCache = await ensureKeyResultHistoryBulk([keyResult.id]);
+        const cachedHistory = historyCache[keyResult.id];
+
+        if (!isMounted) {
+          return;
+        }
+
+        applyHistory(cachedHistory?.history ?? []);
+        setError(cachedHistory?.error ?? null);
+      } catch (historyError) {
+        if (isMounted) {
+          loadedSingularSourceIdRef.current = null;
+          setError(historyError instanceof Error ? historyError.message : "No fue posible consultar el historico.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadSingularHistory();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [keyResult.sourceRecordId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const sourceKeyResultId = keyResult.sourceRecordId.trim();
+
+    if (sourceKeyResultId.length > 0 || initialHistory) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    async function loadFallbackHistory() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const historyCache = await ensureKeyResultHistoryBulk([keyResult.id]);
+
+        if (isMounted) {
+          const cachedHistory = historyCache[keyResult.id];
+
+          applyHistory(cachedHistory?.history ?? []);
+          setError(cachedHistory?.error ?? null);
+        }
+      } catch (historyError) {
+        if (isMounted) {
+          setHistory([]);
+          setError(historyError instanceof Error ? historyError.message : "No fue posible consultar el historico.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadFallbackHistory();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [ensureKeyResultHistoryBulk, initialHistory, keyResult.id, keyResult.sourceRecordId]);
+
   function confirmOutsideClose() {
     setIsCloseConfirmOpen(true);
+  }
+
+  async function handleUpdateHistoryPoint(recordId: string, values: KeyResultHistoryEditableValues) {
+    try {
+      await updateSingularAgileKeyResultHistory({
+        recordId,
+        ...values
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No fue posible actualizar el histórico.";
+
+      onToast?.("error", "No se pudo guardar el histórico", message);
+      throw error;
+    }
+
+    const latestPoint = history.at(-1) ?? null;
+    const nextHistory = history.map((point) =>
+      point.id === recordId || point.sourceId === recordId
+        ? {
+            ...point,
+            currentValue: values.currentValue !== undefined ? values.currentValue : point.currentValue,
+            initialValue: values.initialValue !== undefined ? values.initialValue : point.initialValue,
+            targetValue: values.targetValue !== undefined ? values.targetValue : point.targetValue
+          }
+        : point
+    );
+
+    historySignatureRef.current = getHistorySignature(nextHistory);
+    setHistory(nextHistory);
+    onHistoryChanged?.(nextHistory);
+
+    if (latestPoint?.id === recordId || latestPoint?.sourceId === recordId) {
+      onLatestValuesChanged?.(values);
+    }
+
+    onToast?.("success", "Histórico guardado", "Los valores del Key Result se guardaron correctamente.");
   }
 
   return (
@@ -1285,47 +1987,13 @@ function KeyResultHistoryPanel({
       <header className="client-okrs-history-header">
         <div>
           <span className="client-okrs-section-label">Key Result History</span>
-          <h3>{keyResult.title}</h3>
+          <h3>{getKeyResultDisplayTitle(keyResult)}</h3>
           <p>{getObjectiveTitle(objective)}</p>
         </div>
         <button aria-label="Close Key Result history" className="client-okrs-modal-close" onClick={onClose} type="button">
           ×
         </button>
       </header>
-
-      {sentimentAnalysis ? (
-        <section className={`client-okrs-history-sentiment ${getMetricStatusMeta(sentimentAnalysis.metricStatus).className}`}>
-          <div>
-            <span>Metric Status</span>
-            <strong>{sentimentAnalysis.metricStatus}</strong>
-          </div>
-          <p>{sentimentAnalysis.reason}</p>
-          <small>{sentimentAnalysis.recommendedAction}</small>
-        </section>
-      ) : null}
-
-      <div className="client-okrs-history-filters">
-        <label>
-          <span>Quarter</span>
-          <select onChange={(event) => setQuarterFilter(event.target.value)} value={quarterFilter}>
-            {quarterOptions.map((quarter) => (
-              <option key={quarter} value={quarter}>
-                {quarter === "ALL" ? "All" : quarter}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Status</span>
-          <select onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
-            {statusOptions.map((status) => (
-              <option key={status} value={status}>
-                {status === "ALL" ? "All" : status}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
 
       {isLoading ? (
         <article className="client-okrs-history-state">
@@ -1337,46 +2005,19 @@ function KeyResultHistoryPanel({
           <strong>History could not be loaded</strong>
           <p>{error}</p>
         </article>
-      ) : history.length === 0 ? (
-        <article className="client-okrs-history-state">
-          <strong>No history yet</strong>
-          <p>This Key Result does not have historical snapshots.</p>
-        </article>
       ) : (
-        <>
-          <div className="client-okrs-history-summary">
-            <div>
-              <span>Initial</span>
-              <strong>{formatHistoryMetricValue(latestPoint?.initialValue ?? null)}</strong>
-            </div>
-            <div>
-              <span>Current</span>
-              <strong>{formatHistoryMetricValue(latestPoint?.currentValue ?? null)}</strong>
-            </div>
-            <div>
-              <span>Target</span>
-              <strong>{formatHistoryMetricValue(latestPoint?.targetValue ?? null)}</strong>
-            </div>
-          </div>
-
-          <KeyResultHistoryChart points={filteredHistory} />
-
-          <div className="client-okrs-history-list">
-            {filteredHistory.map((point, index) => (
-              <article key={point.id}>
-                <div>
-                  <strong>{getHistoryAxisLabel(point, index)}</strong>
-                  <span>
-                    {[getHistoryAxisContextLabel(point), point.status || "No status"].filter(Boolean).join(" · ")}
-                  </span>
-                </div>
-                <p>
-                  Initial {formatHistoryMetricValue(point.initialValue)} · Current {formatHistoryMetricValue(point.currentValue)} · Target {formatHistoryMetricValue(point.targetValue)}
-                </p>
-              </article>
-            ))}
-          </div>
-        </>
+        <KeyResultHistoryUiResponseView
+          onUpdateHistoryPoint={handleUpdateHistoryPoint}
+          showFilters
+          showList
+          showSentiment
+          showSummary
+          uiResponse={{
+            history,
+            sentimentAnalysis,
+            type: "key_result_history"
+          }}
+        />
       )}
     </aside>
       {isCloseConfirmOpen ? (
@@ -1479,6 +2120,47 @@ function DetailMetaItem({ label, value }: { label: string; value: string }) {
     <div className="client-okrs-meta-item">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function KeyProjectScoreInput({
+  label,
+  onChange,
+  value
+}: {
+  label: string;
+  onChange: (value: number | null) => void;
+  value: number | null;
+}) {
+  function stepValue(delta: number) {
+    const currentValue = typeof value === "number" && Number.isFinite(value) ? value : 0;
+    onChange(Math.max(0, Number((currentValue + delta).toFixed(1))));
+  }
+
+  return (
+    <div className="client-okrs-key-project-score-control">
+      <input
+        aria-label={label}
+        className="client-okrs-key-project-score-input"
+        inputMode="decimal"
+        onChange={(event) => onChange(parseNullableNumber(event.target.value))}
+        onFocus={(event) => event.currentTarget.select()}
+        type="text"
+        value={value === null ? "" : value.toFixed(1)}
+      />
+      <div className="client-okrs-key-project-score-steppers">
+        <button aria-label={`Increase ${label}`} onClick={() => stepValue(0.1)} type="button">
+          <svg viewBox="0 0 12 12">
+            <path d="M3 7.5 6 4.5l3 3" />
+          </svg>
+        </button>
+        <button aria-label={`Decrease ${label}`} onClick={() => stepValue(-0.1)} type="button">
+          <svg viewBox="0 0 12 12">
+            <path d="M3 4.5 6 7.5l3-3" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
@@ -2599,10 +3281,12 @@ function PortfolioMiniHistoryChart({
   const height = 92;
   const paddingX = 10;
   const paddingY = 14;
-  const values = points.flatMap((point) => [
+  const rawValues = points.flatMap((point) => [
     point.currentValue ?? 0,
     point.targetValue ?? point.currentValue ?? 0
   ]);
+  const shouldNormalizeMixedPercentValues = shouldNormalizeMixedHistoryPercentValues(rawValues);
+  const values = rawValues.map((value) => normalizeHistoryChartValue(value, shouldNormalizeMixedPercentValues));
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const range = maxValue - minValue || 1;
@@ -2613,7 +3297,7 @@ function PortfolioMiniHistoryChart({
   const currentPath = points
     .map((point, index) => {
       const x = xForIndex(index);
-      const y = yForValue(point.currentValue ?? 0);
+      const y = yForValue(normalizeHistoryChartValue(point.currentValue ?? 0, shouldNormalizeMixedPercentValues));
 
       return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
@@ -2626,7 +3310,7 @@ function PortfolioMiniHistoryChart({
       ? targetPoints
           .map(({ index, point }, pathIndex) => {
             const x = xForIndex(index);
-            const y = yForValue(point.targetValue ?? 0);
+            const y = yForValue(normalizeHistoryChartValue(point.targetValue ?? 0, shouldNormalizeMixedPercentValues));
 
             return `${pathIndex === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
           })
@@ -2649,7 +3333,7 @@ function PortfolioMiniHistoryChart({
           <circle
             className="client-okrs-portfolio-kr-point"
             cx={xForIndex(index)}
-            cy={yForValue(point.currentValue ?? 0)}
+            cy={yForValue(normalizeHistoryChartValue(point.currentValue ?? 0, shouldNormalizeMixedPercentValues))}
             fill={getMetricStatusColor(metricStatus)}
             key={`${point.id}-${index}`}
             r="2.5"
@@ -2687,11 +3371,11 @@ function PortfolioKrCard({
       <header>
         <div>
           <span>{keyResult.code || "KR"}</span>
-          <strong>{keyResult.metric || keyResult.title}</strong>
+          <strong>{keyResult.metric || getKeyResultDisplayTitle(keyResult)}</strong>
         </div>
         <KeyResultSentimentBadge analysis={analysis} isLoading={!analysis} />
       </header>
-      <h4>{keyResult.title}</h4>
+      <h4>{getKeyResultDisplayTitle(keyResult)}</h4>
       <div className="client-okrs-portfolio-kr-values">
         <div>
           <span>Current</span>
@@ -2725,10 +3409,10 @@ function PortfolioKrCard({
 
 function KeyResultInlineHistoryChart({
   historyState,
-  metricStatus
+  sentimentAnalysis
 }: {
   historyState?: PortfolioKrHistoryCache[string];
-  metricStatus?: AgileKeyResultSentimentAnalysis["metricStatus"];
+  sentimentAnalysis?: AgileKeyResultSentimentAnalysis;
 }) {
   return (
     <div className="client-okrs-kr-inline-history">
@@ -2736,7 +3420,14 @@ function KeyResultInlineHistoryChart({
         <span>History Trend</span>
       </div>
       {historyState?.status === "ready" ? (
-        <PortfolioMiniHistoryChart history={historyState.history} metricStatus={metricStatus} />
+        <KeyResultHistoryUiResponseView
+          compact
+          uiResponse={{
+            history: historyState.history,
+            sentimentAnalysis,
+            type: "key_result_history"
+          }}
+        />
       ) : historyState?.status === "error" ? (
         <div className="client-okrs-portfolio-kr-chart-empty is-error">{historyState.error ?? "History failed"}</div>
       ) : (
@@ -2941,7 +3632,7 @@ function OkrSummaryCard({
             return (
               <div className="client-okrs-kr-row" key={keyResult.id}>
                 <span className="client-okrs-kr-number">{keyResult.code || `KR ${okrIndex}.${keyResultIndex + 1}`}</span>
-                <p>{keyResult.title}</p>
+                <p>{getKeyResultDisplayTitle(keyResult)}</p>
                 <div className="client-okrs-progress-wrap" aria-label={`${progress}%`}>
                   <div className="client-okrs-progress-track">
                     <span
@@ -2972,28 +3663,43 @@ function OkrSummaryCard({
 }
 
 function OkrDetailModal({
+  allObjectives,
   initialTab = "overview",
+  initialTargetKeyResultId = null,
   initialKeyResultSentiments,
   keyResultHistoryCache,
   keyProjects,
   okr,
   okrIndex,
   onClose,
+  onKeyProjectUpdated,
   onObjectiveUpdated,
+  onProjectToast,
   projects
 }: {
+  allObjectives: AgileObjective[];
   initialTab?: OkrDetailTab;
+  initialTargetKeyResultId?: string | null;
   initialKeyResultSentiments: AgileKeyResultSentimentAnalysis[];
   keyResultHistoryCache?: PortfolioKrHistoryCache;
   keyProjects: AgileKeyProject[];
   okr: AgileObjective;
   okrIndex: number;
   onClose: () => void;
+  onKeyProjectUpdated: (keyProject: AgileKeyProject, options?: KeyProjectUpdatedOptions) => void;
   onObjectiveUpdated: (objective: AgileObjective) => void;
+  onProjectToast: ProjectToastHandler;
   projects: AgileProject[];
 }) {
-  const { ensureKeyResultHistoryBulk } = useOkrsWorkspaceData();
+  const {
+    ensureKeyResultHistoryBulk,
+    ensureProjectData,
+    fetchProjectDataSnapshot,
+    invalidateKeyResultHistory,
+    invalidateProject
+  } = useOkrsWorkspaceData();
   const [activeTab, setActiveTab] = useState<OkrDetailTab>(initialTab);
+  const [highlightedKeyResultId, setHighlightedKeyResultId] = useState<string | null>(initialTargetKeyResultId);
   const keyResults = getObjectiveKeyResults(okr);
   const [editableObjective, setEditableObjective] = useState<AgileObjective>(okr);
   const [isEditingObjective, setIsEditingObjective] = useState(false);
@@ -3002,6 +3708,34 @@ function OkrDetailModal({
   const [activeMetricEditorId, setActiveMetricEditorId] = useState<string | null>(null);
   const [activeHistoryKeyResult, setActiveHistoryKeyResult] = useState<AgileKeyResult | null>(null);
   const [activeKeyProject, setActiveKeyProject] = useState<AgileKeyProject | null>(null);
+  const [editableKeyProject, setEditableKeyProject] = useState<AgileKeyProject | null>(null);
+  const [isEditingKeyProject, setIsEditingKeyProject] = useState(false);
+  const [keyProjectSuggestionTarget, setKeyProjectSuggestionTarget] = useState<AgileKeyProject | null>(null);
+  const [isKeyProjectSuggestionOpen, setIsKeyProjectSuggestionOpen] = useState(false);
+  const [isLoadingKeyProjectSuggestions, setIsLoadingKeyProjectSuggestions] = useState(false);
+  const [keyProjectSuggestionError, setKeyProjectSuggestionError] = useState<string | null>(null);
+  const [keyProjectSuggestions, setKeyProjectSuggestions] = useState<AgileKeyProjectKeyResultSuggestion[]>([]);
+  const [keyProjectSearchQuery, setKeyProjectSearchQuery] = useState("");
+  const [isLinkingKeyProjectResult, setIsLinkingKeyProjectResult] = useState(false);
+  const [pendingKeyProjectLinkKeyResult, setPendingKeyProjectLinkKeyResult] = useState<AgileKeyResult | null>(null);
+  const [optimisticKeyProjectLinksById, setOptimisticKeyProjectLinksById] = useState<
+    Record<string, OptimisticKeyProjectLink>
+  >({});
+  const [singularKeyProjectsByRecordId, setSingularKeyProjectsByRecordId] = useState<
+    Record<string, SingularAgileKeyProjectLinkSnapshot>
+  >({});
+  const [isKeyProjectNameEditorOpen, setIsKeyProjectNameEditorOpen] = useState(false);
+  const [keyProjectNameDraft, setKeyProjectNameDraft] = useState("");
+  const [keyProjectTextEditor, setKeyProjectTextEditor] = useState<{
+    field: "justification" | "story";
+    label: string;
+    maxLength: number;
+    title: string;
+  } | null>(null);
+  const [keyProjectTextDraft, setKeyProjectTextDraft] = useState("");
+  const [isUpdatingKeyProject, setIsUpdatingKeyProject] = useState(false);
+  const [keyProjectUpdateError, setKeyProjectUpdateError] = useState<string | null>(null);
+  const [isKeyProjectUpdateConfirmOpen, setIsKeyProjectUpdateConfirmOpen] = useState(false);
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
   const [isObjectiveUpdateConfirmOpen, setIsObjectiveUpdateConfirmOpen] = useState(false);
   const [pendingKeyResultUpdateId, setPendingKeyResultUpdateId] = useState<string | null>(null);
@@ -3014,14 +3748,100 @@ function OkrDetailModal({
   const [objectiveUpdateError, setObjectiveUpdateError] = useState<string | null>(null);
   const [isUpdatingKeyResult, setIsUpdatingKeyResult] = useState(false);
   const [keyResultUpdateError, setKeyResultUpdateError] = useState<string | null>(null);
+  const [keyResultSyncStatus, setKeyResultSyncStatus] = useState<KeyResultSyncStatus | null>(null);
+  const [localHistoryByKeyResultId, setLocalHistoryByKeyResultId] = useState<PortfolioKrHistoryCache>({});
   const completedKrs = keyResults.filter(isKeyResultComplete).length;
   const progress = computeObjectiveScore(editableObjective);
   const suggestionLines = splitRichTextLines(editableObjective.aiSuggestedKeyResults);
   const quarter = getObjectiveQuarter(editableObjective);
   const keyResultHistorySignature = editableKeyResults.map((keyResult) => keyResult.id).join("|");
+  const allProjectKeyResults = getAllObjectiveKeyResults(allObjectives);
+  const getHydratedKeyProject = (keyProject: AgileKeyProject | null) => {
+    if (!keyProject) {
+      return null;
+    }
+
+    const optimisticLink = optimisticKeyProjectLinksById[keyProject.id];
+    const singularKeyProject = keyProject.sourceRecordId
+      ? singularKeyProjectsByRecordId[keyProject.sourceRecordId]
+      : undefined;
+    const linkedKeyResultIds = optimisticLink?.keyResultIds.length
+      ? optimisticLink.keyResultIds
+      : singularKeyProject?.keyResultIds.length
+        ? singularKeyProject.keyResultIds
+        : keyProject.keyResultIds;
+    const linkedKeyResultLabels = optimisticLink?.keyResultLabels.length
+      ? optimisticLink.keyResultLabels
+      : (singularKeyProject?.keyResultLabels?.length ?? 0) > 0
+        ? singularKeyProject?.keyResultLabels
+        : keyProject.keyResultLabels;
+
+    if (!optimisticLink && !singularKeyProject) {
+      return keyProject;
+    }
+
+    return {
+      ...keyProject,
+      keyResultIds: linkedKeyResultIds,
+      keyResultLabels: linkedKeyResultLabels
+    };
+  };
+  const activeKeyProjectView = getHydratedKeyProject(editableKeyProject ?? activeKeyProject);
+  const keyProjectSuggestionView = keyProjectSuggestionTarget
+    ? getHydratedKeyProject(keyProjectSuggestionTarget)
+    : activeKeyProjectView;
+  const linkedKeyResultsForActiveKeyProject = activeKeyProjectView
+    ? allProjectKeyResults.filter(({ keyResult }) => keyProjectHasKeyResult(activeKeyProjectView, keyResult))
+    : [];
+  const filteredKeyProjectSearchResults = keyProjectSearchQuery.trim()
+    ? allProjectKeyResults.filter(({ keyResult, objective }) => {
+        const query = keyProjectSearchQuery.trim().toLowerCase();
+        return [
+          keyResult.code,
+          keyResult.title,
+          getKeyResultDisplayTitle(keyResult),
+          keyResult.metric,
+          getObjectiveTitle(objective)
+        ].some((value) => value.toLowerCase().includes(query));
+      })
+    : allProjectKeyResults;
+
+  useEffect(() => {
+    const recordIds = keyProjects
+      .map((keyProject) => keyProject.sourceRecordId.trim())
+      .filter((recordId) => recordId.length > 0);
+
+    if (recordIds.length === 0) {
+      return;
+    }
+
+    let isCurrent = true;
+
+    void fetchSingularAgileKeyProjects(recordIds)
+      .then((payload) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setSingularKeyProjectsByRecordId((current) => ({
+          ...current,
+          ...Object.fromEntries(payload.keyProjects.map((keyProject) => [keyProject.id, keyProject]))
+        }));
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setSingularKeyProjectsByRecordId((current) => current);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [keyProjects]);
 
   useEffect(() => {
     setActiveTab(initialTab);
+    setHighlightedKeyResultId(initialTargetKeyResultId);
     setEditableObjective(okr);
     setIsEditingObjective(false);
     setEditableKeyResults(keyResults);
@@ -3029,6 +3849,23 @@ function OkrDetailModal({
     setActiveMetricEditorId(null);
     setActiveHistoryKeyResult(null);
     setActiveKeyProject(null);
+    setEditableKeyProject(null);
+    setIsEditingKeyProject(false);
+    setKeyProjectSuggestionTarget(null);
+    setIsKeyProjectSuggestionOpen(false);
+    setIsLoadingKeyProjectSuggestions(false);
+      setKeyProjectSuggestionError(null);
+      setKeyProjectSuggestions([]);
+      setKeyProjectSearchQuery("");
+      setPendingKeyProjectLinkKeyResult(null);
+      setOptimisticKeyProjectLinksById({});
+      setIsLinkingKeyProjectResult(false);
+    setIsKeyProjectNameEditorOpen(false);
+    setKeyProjectNameDraft("");
+    setKeyProjectTextEditor(null);
+    setKeyProjectTextDraft("");
+    setIsUpdatingKeyProject(false);
+    setKeyProjectUpdateError(null);
     setIsCloseConfirmOpen(false);
     setIsObjectiveUpdateConfirmOpen(false);
     setPendingKeyResultUpdateId(null);
@@ -3038,7 +3875,57 @@ function OkrDetailModal({
     setIsUpdatingObjective(false);
     setKeyResultUpdateError(null);
     setIsUpdatingKeyResult(false);
-  }, [initialTab, okr.id]);
+    setKeyResultSyncStatus(null);
+    setLocalHistoryByKeyResultId({});
+  }, [initialTab, initialTargetKeyResultId, okr.id]);
+
+  useEffect(() => {
+    if (activeTab !== "key-results" || !initialTargetKeyResultId) {
+      return;
+    }
+
+    const targetKeyResultId = initialTargetKeyResultId;
+    let animationFrameId = 0;
+    function scrollToTarget() {
+      animationFrameId = window.requestAnimationFrame(() => {
+        const target = findKeyResultDetailElement(targetKeyResultId);
+
+        target?.scrollIntoView({
+          behavior: "smooth",
+          block: "start"
+        });
+        setHighlightedKeyResultId(targetKeyResultId);
+      });
+    }
+
+    const timeoutId = window.setTimeout(scrollToTarget, 120);
+    const retryTimeoutId = window.setTimeout(scrollToTarget, 900);
+    const clearHighlightTimeoutId = window.setTimeout(() => {
+      setHighlightedKeyResultId((current) => (current === targetKeyResultId ? null : current));
+    }, 2200);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearTimeout(retryTimeoutId);
+      window.clearTimeout(clearHighlightTimeoutId);
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [activeTab, editableKeyResults.length, initialTargetKeyResultId]);
+
+  useEffect(() => {
+    setEditableKeyProject(activeKeyProject);
+    setIsEditingKeyProject(false);
+    setIsUpdatingKeyProject(false);
+    setKeyProjectUpdateError(null);
+    setIsKeyProjectSuggestionOpen(false);
+    setIsLoadingKeyProjectSuggestions(false);
+    setKeyProjectSuggestionError(null);
+    setKeyProjectSuggestions([]);
+    setKeyProjectSearchQuery("");
+    setIsLinkingKeyProjectResult(false);
+  }, [activeKeyProject?.id]);
 
   useEffect(() => {
     if (initialKeyResultSentiments.length === 0) {
@@ -3110,16 +3997,222 @@ function OkrDetailModal({
       return;
     }
 
-    const missingHistoryIds = editableKeyResults
-      .map((keyResult) => keyResult.id)
-      .filter((keyResultId) => !keyResultHistoryCache?.[keyResultId]);
+    const missingHistoryKeyResults = editableKeyResults.filter(
+      (keyResult) => getKeyResultHistoryState(keyResult.id)?.status !== "ready"
+    );
+    const missingHistoryIds = missingHistoryKeyResults.map((keyResult) => keyResult.id);
 
     if (missingHistoryIds.length === 0) {
       return;
     }
 
-    void ensureKeyResultHistoryBulk(missingHistoryIds);
-  }, [activeTab, ensureKeyResultHistoryBulk, keyResultHistoryCache, keyResultHistorySignature]);
+    let isMounted = true;
+
+    async function loadKeyResultHistory() {
+      const foundationHistoryCache = await ensureKeyResultHistoryBulk(missingHistoryIds);
+      const singularFallbackKeyResults = missingHistoryKeyResults.filter((keyResult) => {
+        const foundationHistory = foundationHistoryCache[keyResult.id]?.history ?? [];
+        return foundationHistory.length === 0 && keyResult.sourceRecordId.trim().length > 0;
+      });
+
+      if (singularFallbackKeyResults.length === 0) {
+        return;
+      }
+
+      const singularHistoryPayload = await fetchSingularAgileKeyResultHistoryBulk(
+        singularFallbackKeyResults.map((keyResult) => keyResult.sourceRecordId)
+      ).catch(() => null);
+
+      if (!isMounted || !singularHistoryPayload) {
+        return;
+      }
+
+      setLocalHistoryByKeyResultId((current) => {
+        const next = { ...current };
+
+        for (const keyResult of singularFallbackKeyResults) {
+          const singularHistory = singularHistoryPayload.historyByKeyResultId[keyResult.sourceRecordId] ?? [];
+
+          if (singularHistory.length > 0) {
+            next[keyResult.id] = {
+              history: singularHistory,
+              status: "ready"
+            };
+          }
+        }
+
+        return next;
+      });
+    }
+
+    void loadKeyResultHistory();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, ensureKeyResultHistoryBulk, keyResultHistoryCache, keyResultHistorySignature, localHistoryByKeyResultId]);
+
+  function getKeyResultHistoryState(keyResultId: string) {
+    return localHistoryByKeyResultId[keyResultId] ?? keyResultHistoryCache?.[keyResultId];
+  }
+
+  function applyOptimisticLatestHistoryValues(keyResultId: string, values: KeyResultHistoryEditableValues) {
+    const historyState = getKeyResultHistoryState(keyResultId);
+
+    if (historyState?.status !== "ready" || historyState.history.length === 0) {
+      return;
+    }
+
+    const latestPoint = historyState.history.at(-1);
+    if (!latestPoint) {
+      return;
+    }
+
+    setLocalHistoryByKeyResultId((current) => ({
+      ...current,
+      [keyResultId]: {
+        history: historyState.history.map((point) =>
+          point.id === latestPoint.id
+            ? {
+                ...point,
+                currentValue: values.currentValue !== undefined ? values.currentValue : point.currentValue,
+                initialValue: values.initialValue !== undefined ? values.initialValue : point.initialValue,
+                targetValue: values.targetValue !== undefined ? values.targetValue : point.targetValue
+              }
+            : point
+        ),
+        status: "ready"
+      }
+    }));
+  }
+
+  function areNullableNumbersEqual(actual: number | null, expected: number | null | undefined) {
+    if (expected === undefined) {
+      return true;
+    }
+
+    if (actual === null || expected === null) {
+      return actual === expected;
+    }
+
+    return Math.abs(actual - expected) < 0.005;
+  }
+
+  function keyResultMatchesExpectedValues(
+    keyResult: AgileKeyResult,
+    expectedValues: KeyResultHistoryEditableValues
+  ) {
+    return (
+      areNullableNumbersEqual(keyResult.initialValue, expectedValues.initialValue) &&
+      areNullableNumbersEqual(keyResult.currentValue, expectedValues.currentValue) &&
+      areNullableNumbersEqual(keyResult.targetValue, expectedValues.targetValue)
+    );
+  }
+
+  function applyOptimisticKeyResultValues(keyResultId: string, values: KeyResultHistoryEditableValues) {
+    const nextKeyResults = editableKeyResults.map((keyResult) => {
+      if (keyResult.id !== keyResultId) {
+        return keyResult;
+      }
+
+      const nextKeyResult = {
+        ...keyResult,
+        currentValue: values.currentValue !== undefined ? values.currentValue : keyResult.currentValue,
+        initialValue: values.initialValue !== undefined ? values.initialValue : keyResult.initialValue,
+        targetValue: values.targetValue !== undefined ? values.targetValue : keyResult.targetValue
+      };
+
+      return {
+        ...nextKeyResult,
+        progress: calculateKeyResultProgress(
+          nextKeyResult.initialValue,
+          nextKeyResult.currentValue,
+          nextKeyResult.targetValue
+        ) ?? nextKeyResult.progress
+      };
+    });
+    const nextObjective = {
+      ...editableObjective,
+      keyResults: nextKeyResults
+    };
+
+    setEditableKeyResults(nextKeyResults);
+    setEditableObjective(nextObjective);
+    onObjectiveUpdated(nextObjective);
+  }
+
+  async function syncKeyResultAfterSingularUpdate(input: {
+    expectedValues: KeyResultHistoryEditableValues;
+    keyResultId: string;
+    projectId: string;
+  }) {
+    setKeyResultSyncStatus({
+      keyResultId: input.keyResultId,
+      message: "Waiting for Foundation sync",
+      status: "syncing"
+    });
+
+    for (let attempt = 0; attempt < keyResultFoundationSyncPollDelays.length; attempt += 1) {
+      await wait(keyResultFoundationSyncPollDelays[attempt]);
+
+      try {
+        const projectData = await fetchProjectDataSnapshot(input.projectId);
+        const syncedObjective = projectData.objectives.find((candidate) => candidate.id === editableObjective.id);
+        const syncedKeyResult = syncedObjective
+          ? getObjectiveKeyResults(syncedObjective).find((candidate) => candidate.id === input.keyResultId)
+          : null;
+
+        if (syncedKeyResult && keyResultMatchesExpectedValues(syncedKeyResult, input.expectedValues)) {
+          const historyPayload = await fetchAgileKeyResultHistoryBulk([input.keyResultId]).catch(() => null);
+          const nextHistory = historyPayload?.historyByKeyResultId[input.keyResultId];
+
+          if (nextHistory) {
+            setLocalHistoryByKeyResultId((current) => ({
+              ...current,
+              [input.keyResultId]: {
+                history: nextHistory,
+                status: "ready"
+              }
+            }));
+          }
+
+          if (syncedObjective) {
+            setEditableObjective((currentObjective) => {
+              if (currentObjective.id !== syncedObjective.id) {
+                return currentObjective;
+              }
+
+              return {
+                ...currentObjective,
+                keyResults: getObjectiveKeyResults(syncedObjective)
+              };
+            });
+            setEditableKeyResults(getObjectiveKeyResults(syncedObjective));
+          }
+
+          setKeyResultSyncStatus({
+            keyResultId: input.keyResultId,
+            message: "Foundation sync complete",
+            status: "synced"
+          });
+          window.setTimeout(() => {
+            setKeyResultSyncStatus((current) =>
+              current?.keyResultId === input.keyResultId && current.status === "synced" ? null : current
+            );
+          }, 1800);
+          return;
+        }
+      } catch {
+        // Keep polling; the user already sees the optimistic update.
+      }
+    }
+
+    setKeyResultSyncStatus({
+      keyResultId: input.keyResultId,
+      message: "Foundation sync is still pending",
+      status: "timeout"
+    });
+  }
 
   function updateEditableKeyResult(keyResultId: string, changes: Partial<AgileKeyResult>) {
     const shouldRecalculateProgress =
@@ -3165,6 +4258,17 @@ function OkrDetailModal({
     }));
   }
 
+  function updateEditableKeyProject(changes: Partial<AgileKeyProject>) {
+    setEditableKeyProject((currentKeyProject) =>
+      currentKeyProject
+        ? {
+            ...currentKeyProject,
+            ...changes
+          }
+        : currentKeyProject
+    );
+  }
+
   function discardEditableKeyResultChanges(keyResultId: string) {
     const originalKeyResult = keyResults.find((candidate) => candidate.id === keyResultId);
 
@@ -3189,12 +4293,304 @@ function OkrDetailModal({
     setObjectiveUpdateError(null);
   }
 
+  function discardEditableKeyProjectChanges() {
+    setEditableKeyProject(activeKeyProject);
+    setIsEditingKeyProject(false);
+    setIsKeyProjectUpdateConfirmOpen(false);
+    setIsKeyProjectNameEditorOpen(false);
+    setKeyProjectNameDraft("");
+    setKeyProjectTextEditor(null);
+    setKeyProjectTextDraft("");
+    setKeyProjectUpdateError(null);
+  }
+
+  function openKeyProjectNameEditor() {
+    if (!activeKeyProjectView) {
+      return;
+    }
+
+    setKeyProjectNameDraft(activeKeyProjectView.name);
+    setIsKeyProjectNameEditorOpen(true);
+  }
+
+  function applyKeyProjectNameDraft() {
+    const nextName = keyProjectNameDraft.trim();
+
+    if (!nextName) {
+      setKeyProjectUpdateError("Epic Name no puede estar vacío.");
+      return;
+    }
+
+    updateEditableKeyProject({ name: nextName });
+    setIsKeyProjectNameEditorOpen(false);
+    setKeyProjectNameDraft("");
+    setKeyProjectUpdateError(null);
+  }
+
+  function openKeyProjectTextEditor(input: {
+    field: "justification" | "story";
+    label: string;
+    maxLength: number;
+    title: string;
+    value: string;
+  }) {
+    setKeyProjectTextEditor({
+      field: input.field,
+      label: input.label,
+      maxLength: input.maxLength,
+      title: input.title
+    });
+    setKeyProjectTextDraft(input.value);
+  }
+
+  function closeKeyProjectTextEditor() {
+    setKeyProjectTextEditor(null);
+    setKeyProjectTextDraft("");
+  }
+
+  function applyKeyProjectTextDraft() {
+    if (!keyProjectTextEditor) {
+      return;
+    }
+
+    updateEditableKeyProject({
+      [keyProjectTextEditor.field]: keyProjectTextDraft.trim()
+    });
+    closeKeyProjectTextEditor();
+    setKeyProjectUpdateError(null);
+  }
+
+  async function saveEditableKeyProject() {
+    if (!editableKeyProject) {
+      return;
+    }
+
+    const sourceKeyProjectId = editableKeyProject.sourceRecordId.trim();
+    const keyProjectName = editableKeyProject.name.trim();
+
+    if (!sourceKeyProjectId) {
+      const message = "Este Key Project no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.";
+      setKeyProjectUpdateError(message);
+      onProjectToast("error", "No se pudo guardar el Key Project", message);
+      return;
+    }
+
+    if (!keyProjectName) {
+      const message = "Epic Name no puede estar vacío.";
+      setKeyProjectUpdateError(message);
+      onProjectToast("error", "No se pudo guardar el Key Project", message);
+      return;
+    }
+
+    const updateInput: SingularAgileKeyProjectUpdateInput = {
+      clarity: editableKeyProject.clarity,
+      dontShowInSingularStories: editableKeyProject.dontShowInSingularStories,
+      epicStory: editableKeyProject.story,
+      justification: editableKeyProject.justification,
+      name: keyProjectName,
+      recordId: sourceKeyProjectId,
+      status: editableKeyProject.status,
+      strategicFocus: editableKeyProject.strategicFocus,
+      valueOrientation: editableKeyProject.valueOrientation
+    };
+
+    const updatedKeyProject: AgileKeyProject = {
+      ...editableKeyProject,
+      name: keyProjectName
+    };
+
+    setIsUpdatingKeyProject(true);
+    setKeyProjectUpdateError(null);
+
+    try {
+      await updateSingularAgileKeyProject(updateInput);
+      setActiveKeyProject(updatedKeyProject);
+      setEditableKeyProject(updatedKeyProject);
+      setIsEditingKeyProject(false);
+      setIsKeyProjectUpdateConfirmOpen(false);
+      onKeyProjectUpdated(updatedKeyProject, { silent: true });
+      invalidateProject(editableObjective.projectIds[0]);
+      onProjectToast("success", "Key Project guardado", "Los cambios se guardaron correctamente.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No fue posible actualizar el Key Project.";
+      setKeyProjectUpdateError(message);
+      onProjectToast("error", "No se pudo guardar el Key Project", message);
+    } finally {
+      setIsUpdatingKeyProject(false);
+    }
+  }
+
+  async function openKeyProjectSuggestionModal(targetKeyProject = activeKeyProjectView) {
+    if (!targetKeyProject) {
+      return;
+    }
+
+    setKeyProjectSuggestionTarget(targetKeyProject);
+    setIsKeyProjectSuggestionOpen(true);
+    setIsLoadingKeyProjectSuggestions(true);
+    setKeyProjectSuggestionError(null);
+    setKeyProjectSearchQuery("");
+
+    try {
+      const payload = await suggestKeyResultsForKeyProject({
+        keyProject: {
+          id: targetKeyProject.id,
+          justification: targetKeyProject.justification,
+          keyProjectId: targetKeyProject.keyProjectId,
+          name: targetKeyProject.name,
+          story: targetKeyProject.story
+        },
+        objectives: allObjectives,
+        projectId: targetKeyProject.projectIds[0] ?? editableObjective.projectIds[0] ?? "",
+        projectName: getProjectNames(targetKeyProject.projectIds)
+      });
+
+      setKeyProjectSuggestions(payload.suggestions);
+    } catch (error) {
+      setKeyProjectSuggestions([]);
+      setKeyProjectSuggestionError(
+        error instanceof Error ? error.message : "No fue posible sugerir Key Results."
+      );
+    } finally {
+      setIsLoadingKeyProjectSuggestions(false);
+    }
+  }
+
+  function requestLinkKeyProjectToKeyResult(keyResult: AgileKeyResult) {
+    if (!keyProjectSuggestionView) {
+      return;
+    }
+
+    const sourceKeyProjectId = keyProjectSuggestionView.sourceRecordId.trim();
+    if (!sourceKeyProjectId) {
+      setKeyProjectSuggestionError("Este Key Project no tiene sourceRecordId para actualizarlo en Singular AGILE.");
+      return;
+    }
+
+    const keyResultLinkId = getKeyResultLinkId(keyResult).trim();
+    if (!keyResultLinkId) {
+      setKeyProjectSuggestionError("Este Key Result no tiene record id disponible para vincularlo.");
+      return;
+    }
+
+    setKeyProjectSuggestionError(null);
+    setPendingKeyProjectLinkKeyResult(keyResult);
+  }
+
+  async function linkKeyProjectToKeyResult(keyResult: AgileKeyResult) {
+    if (!keyProjectSuggestionView) {
+      return;
+    }
+
+    const sourceKeyProjectId = keyProjectSuggestionView.sourceRecordId.trim();
+    if (!sourceKeyProjectId) {
+      setKeyProjectSuggestionError("Este Key Project no tiene sourceRecordId para actualizarlo en Singular AGILE.");
+      return;
+    }
+
+    const keyResultLinkId = getKeyResultLinkId(keyResult).trim();
+    if (!keyResultLinkId) {
+      setKeyProjectSuggestionError("Este Key Result no tiene record id disponible para vincularlo.");
+      return;
+    }
+
+    setIsLinkingKeyProjectResult(true);
+    setKeyProjectSuggestionError(null);
+
+    try {
+      await updateSingularAgileKeyProject({
+        keyResultIds: [keyResultLinkId],
+        recordId: sourceKeyProjectId
+      });
+
+      const keyResultLabel = getKeyResultDisplayTitle(keyResult);
+      const updatedKeyProject = {
+        ...keyProjectSuggestionView,
+        keyResultIds: [keyResultLinkId],
+        keyResultLabels: [keyResultLabel]
+      };
+      setOptimisticKeyProjectLinksById((current) => ({
+        ...current,
+        [updatedKeyProject.id]: {
+          keyResultIds: [keyResultLinkId],
+          keyResultLabels: [keyResultLabel],
+          status: "pending"
+        }
+      }));
+      setSingularKeyProjectsByRecordId((current) => ({
+        ...current,
+        [sourceKeyProjectId]: {
+          id: sourceKeyProjectId,
+          keyResultIds: [keyResultLinkId],
+          keyResultLabels: [keyResultLabel],
+          name: updatedKeyProject.name
+        }
+      }));
+
+      if (activeKeyProject?.id === updatedKeyProject.id) {
+        setActiveKeyProject(updatedKeyProject);
+        setEditableKeyProject(updatedKeyProject);
+      }
+      setIsKeyProjectSuggestionOpen(false);
+      setKeyProjectSuggestionTarget(null);
+      setPendingKeyProjectLinkKeyResult(null);
+      setKeyProjectSuggestions([]);
+      setKeyProjectSearchQuery("");
+      onKeyProjectUpdated(updatedKeyProject);
+      onProjectToast("success", "KR linked", "The Key Result was assigned to this Key Project.");
+      void fetchSingularAgileKeyProjects([sourceKeyProjectId])
+        .then((payload) => {
+          const confirmedKeyProject = payload.keyProjects.find((candidate) => candidate.id === sourceKeyProjectId);
+
+          if (!confirmedKeyProject) {
+            return;
+          }
+
+          setSingularKeyProjectsByRecordId((current) => ({
+            ...current,
+            [sourceKeyProjectId]: confirmedKeyProject
+          }));
+
+          const isConfirmed = confirmedKeyProject.keyResultIds.includes(keyResultLinkId);
+          if (isConfirmed) {
+            setOptimisticKeyProjectLinksById((current) => ({
+              ...current,
+              [updatedKeyProject.id]: {
+                keyResultIds: [keyResultLinkId],
+                keyResultLabels: [keyResultLabel],
+                status: "synced"
+              }
+            }));
+          }
+        })
+        .catch(() => {
+          setOptimisticKeyProjectLinksById((current) => current);
+        });
+      const projectId = keyProjectSuggestionView.projectIds[0];
+      if (projectId) {
+        invalidateProject(projectId);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No fue posible vincular el Key Project al Key Result.";
+      setKeyProjectSuggestionError(
+        message
+      );
+      onProjectToast("error", "KR link failed", message);
+    } finally {
+      setIsLinkingKeyProjectResult(false);
+    }
+  }
+
   async function saveEditableObjective() {
     const project = projects.find((candidate) => candidate.id === editableObjective.projectIds[0]) ?? null;
     const sourceObjectiveId = editableObjective.recordId.trim();
 
     if (!sourceObjectiveId) {
-      throw new Error("Este Objective no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.");
+      const message = "Este Objective no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.";
+      setObjectiveUpdateError(message);
+      setIsObjectiveUpdateConfirmOpen(false);
+      onProjectToast("error", "No se pudo guardar el Objective", message);
+      return;
     }
 
     setIsUpdatingObjective(true);
@@ -3217,10 +4613,11 @@ function OkrDetailModal({
       setIsEditingObjective(false);
       setIsObjectiveUpdateConfirmOpen(false);
       onObjectiveUpdated(editableObjective);
+      onProjectToast("success", "Objective guardado", "Los cambios se guardaron correctamente.");
     } catch (error) {
-      setObjectiveUpdateError(
-        error instanceof Error ? error.message : "No fue posible actualizar el Objective."
-      );
+      const message = error instanceof Error ? error.message : "No fue posible actualizar el Objective.";
+      setObjectiveUpdateError(message);
+      onProjectToast("error", "No se pudo guardar el Objective", message);
     } finally {
       setIsUpdatingObjective(false);
     }
@@ -3228,6 +4625,7 @@ function OkrDetailModal({
 
   async function saveEditableKeyResult(keyResultId: string) {
     const keyResult = editableKeyResults.find((candidate) => candidate.id === keyResultId);
+    const originalKeyResult = keyResults.find((candidate) => candidate.id === keyResultId) ?? null;
     const project = projects.find((candidate) => candidate.id === editableObjective.projectIds[0]) ?? null;
 
     if (!keyResult) {
@@ -3236,20 +4634,26 @@ function OkrDetailModal({
     }
 
     if (!project?.sourceRecordId?.trim()) {
-      setKeyResultUpdateError("Este Project no tiene sourceRecordId configurado para actualizar KRs en Singular AGILE.");
+      const message = "Este Project no tiene sourceRecordId configurado para actualizar KRs en Singular AGILE.";
+      setKeyResultUpdateError(message);
       setPendingKeyResultUpdateId(null);
+      onProjectToast("error", "No se pudo guardar el Key Result", message);
       return;
     }
 
     if (!editableObjective.recordId.trim()) {
-      setKeyResultUpdateError("Este Objective no tiene sourceRecordId / record_id configurado para actualizar KRs en Singular AGILE.");
+      const message = "Este Objective no tiene sourceRecordId / record_id configurado para actualizar KRs en Singular AGILE.";
+      setKeyResultUpdateError(message);
       setPendingKeyResultUpdateId(null);
+      onProjectToast("error", "No se pudo guardar el Key Result", message);
       return;
     }
 
     if (!keyResult.sourceRecordId.trim()) {
-      setKeyResultUpdateError("Este Key Result no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.");
+      const message = "Este Key Result no tiene sourceRecordId / record_id configurado para actualizarlo en Singular AGILE.";
+      setKeyResultUpdateError(message);
       setPendingKeyResultUpdateId(null);
+      onProjectToast("error", "No se pudo guardar el Key Result", message);
       return;
     }
 
@@ -3258,7 +4662,7 @@ function OkrDetailModal({
 
     try {
       const response = await fetch(updateKeyResultWebhookUrl, {
-        body: JSON.stringify(buildKeyResultUpdatePayload({ keyResult, objective: editableObjective, project })),
+        body: JSON.stringify(buildKeyResultUpdatePayload({ keyResult, objective: editableObjective, originalKeyResult, project })),
         headers: {
           "Content-Type": "application/json"
         },
@@ -3274,14 +4678,30 @@ function OkrDetailModal({
         ...editableObjective,
         keyResults: editableKeyResults
       };
+      const projectId = editableObjective.projectIds[0] ?? "";
+      const expectedValues = {
+        currentValue: keyResult.currentValue,
+        initialValue: keyResult.initialValue,
+        targetValue: keyResult.targetValue
+      };
+
       setEditableObjective(nextObjective);
+      applyOptimisticLatestHistoryValues(keyResult.id, expectedValues);
       setEditingKeyResultId(null);
       setPendingKeyResultUpdateId(null);
       onObjectiveUpdated(nextObjective);
+      if (projectId) {
+        void syncKeyResultAfterSingularUpdate({
+          expectedValues,
+          keyResultId: keyResult.id,
+          projectId
+        });
+      }
+      onProjectToast("success", "Key Result guardado", "Los cambios se guardaron correctamente.");
     } catch (error) {
-      setKeyResultUpdateError(
-        error instanceof Error ? error.message : "No fue posible actualizar el Key Result."
-      );
+      const message = error instanceof Error ? error.message : "No fue posible actualizar el Key Result.";
+      setKeyResultUpdateError(message);
+      onProjectToast("error", "No se pudo guardar el Key Result", message);
     } finally {
       setIsUpdatingKeyResult(false);
     }
@@ -3537,6 +4957,11 @@ function OkrDetailModal({
             {keyResultUpdateError ? (
               <p className="client-okrs-sentiment-error">{keyResultUpdateError}</p>
             ) : null}
+            {keyResultSyncStatus ? (
+              <p className={`client-okrs-sync-inline is-${keyResultSyncStatus.status}`}>
+                {keyResultSyncStatus.message}
+              </p>
+            ) : null}
             {editableKeyResults.length > 0 ? (
               <article className="client-okrs-kr-detail-card">
                 {editableKeyResults.map((keyResult, keyResultIndex) => {
@@ -3546,7 +4971,11 @@ function OkrDetailModal({
                   const sentimentAnalysis = keyResultSentiments[keyResult.id];
 
                   return (
-                  <div className="client-okrs-kr-real-detail" key={keyResult.id}>
+                  <div
+                    className={`client-okrs-kr-real-detail${highlightedKeyResultId === keyResult.id ? " is-scroll-target" : ""}`}
+                    data-key-result-detail-id={keyResult.id}
+                    key={keyResult.id}
+                  >
                     <div className="client-okrs-kr-detail-main">
                       <div className="client-okrs-kr-detail-title">
                         {isEditingKeyResult ? (
@@ -3567,7 +4996,7 @@ function OkrDetailModal({
                             value={keyResult.title}
                           />
                         ) : (
-                          <h3>{keyResult.title}</h3>
+                          <h3>{getKeyResultDisplayTitle(keyResult)}</h3>
                         )}
                         <KeyResultSentimentBadge
                           analysis={sentimentAnalysis}
@@ -3642,8 +5071,8 @@ function OkrDetailModal({
                     </div>
                     <div className="client-okrs-kr-detail-content">
                       <KeyResultInlineHistoryChart
-                        historyState={keyResultHistoryCache?.[keyResult.id]}
-                        metricStatus={sentimentAnalysis?.metricStatus}
+                        historyState={getKeyResultHistoryState(keyResult.id)}
+                        sentimentAnalysis={sentimentAnalysis}
                       />
                       <div className="client-okrs-kr-metric-grid">
                         <EditableMetricItem
@@ -3711,11 +5140,21 @@ function OkrDetailModal({
 
         {activeTab === "key-projects" ? (
           <div className="client-okrs-detail-stack">
-            {activeKeyProject ? (
+            {activeKeyProjectView ? (
               <>
                 <button
                   className="client-okrs-detail-inline-back"
-                  onClick={() => setActiveKeyProject(null)}
+                  onClick={() => {
+                    setActiveKeyProject(null);
+                    setEditableKeyProject(null);
+                    setIsEditingKeyProject(false);
+                    setIsKeyProjectUpdateConfirmOpen(false);
+                    setIsKeyProjectNameEditorOpen(false);
+                    setKeyProjectNameDraft("");
+                    setKeyProjectTextEditor(null);
+                    setKeyProjectTextDraft("");
+                    setKeyProjectUpdateError(null);
+                  }}
                   type="button"
                 >
                   <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -3726,27 +5165,145 @@ function OkrDetailModal({
                 </button>
 
                 <section className="client-okrs-detail-card client-okrs-key-project-detail">
+                  <div className="client-okrs-key-project-actions">
+                    <button
+                      aria-label={isEditingKeyProject ? "Save Key Project changes" : "Edit Key Project"}
+                      className={`client-okrs-kr-edit-button${isEditingKeyProject ? " is-editing" : ""}`}
+                      disabled={isUpdatingKeyProject}
+                      onClick={() => {
+                        if (isEditingKeyProject) {
+                          setIsKeyProjectUpdateConfirmOpen(true);
+                          return;
+                        }
+
+                        setIsEditingKeyProject(true);
+                        setKeyProjectUpdateError(null);
+                      }}
+                      type="button"
+                    >
+                      {isEditingKeyProject ? (
+                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+                          <path d="M17 21v-8H7v8" />
+                          <path d="M7 3v5h8" />
+                        </svg>
+                      ) : (
+                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                      )}
+                    </button>
+                    {isEditingKeyProject ? (
+                      <button
+                        className="client-okrs-detail-inline-back client-okrs-key-project-cancel"
+                        disabled={isUpdatingKeyProject}
+                        onClick={discardEditableKeyProjectChanges}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                  {keyProjectUpdateError ? <p className="client-okrs-sentiment-error">{keyProjectUpdateError}</p> : null}
                   <div className="client-okrs-detail-heading-row">
                     <div>
                       <span className="client-okrs-section-label">Key Project</span>
-                      <h2>{activeKeyProject.name || "Untitled Key Project"}</h2>
+                      {isEditingKeyProject ? (
+                        <div className="client-okrs-key-project-title-edit">
+                          <h2>{activeKeyProjectView.name || "Untitled Key Project"}</h2>
+                          <button
+                            aria-label="Edit Epic Name"
+                            onClick={openKeyProjectNameEditor}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                          </button>
+                        </div>
+                      ) : (
+                        <h2>{activeKeyProjectView.name || "Untitled Key Project"}</h2>
+                      )}
                     </div>
-                    <span className={`client-okrs-related-key-project-status${getKeyProjectStatusClass(activeKeyProject.status)}`}>
-                      {activeKeyProject.status || "Not set"}
-                    </span>
+                    {isEditingKeyProject ? (
+                      <select
+                        aria-label="Key Project status"
+                        className="client-okrs-key-project-status-select"
+                        onChange={(event) => updateEditableKeyProject({ status: event.target.value })}
+                        value={activeKeyProjectView.status || keyProjectStatusOptions[0]}
+                      >
+                        {keyProjectStatusOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className={`client-okrs-related-key-project-status${getKeyProjectStatusClass(activeKeyProjectView.status)}`}>
+                        {activeKeyProjectView.status || "Not set"}
+                      </span>
+                    )}
                   </div>
-                  <p>{activeKeyProject.story || "No story set"}</p>
 
                   <section className="client-okrs-key-project-section">
                     <div className="client-okrs-detail-card-head">
                       <span>Project Scope</span>
                     </div>
                     <div className="client-okrs-meta-grid">
-                      <DetailMetaItem label="Project" value={getProjectNames(activeKeyProject.projectIds)} />
-                      <DetailMetaItem label="Total Stories" value={activeKeyProject.totalStories === null ? "Not set" : String(activeKeyProject.totalStories)} />
-                      <DetailMetaItem label="ID" value={activeKeyProject.keyProjectId} />
-                      <DetailMetaItem label="Visibility" value={activeKeyProject.dontShowInSingularStories ? "Hidden in Singular Stories" : "Shown in Singular Stories"} />
+                      <DetailMetaItem label="Project" value={getProjectNames(activeKeyProjectView.projectIds)} />
+                      <DetailMetaItem label="Total Stories" value={activeKeyProjectView.totalStories === null ? "Not set" : String(activeKeyProjectView.totalStories)} />
+                      {isEditingKeyProject ? (
+                        <label className="client-okrs-meta-item is-editing">
+                          <span>Visibility</span>
+                          <select
+                            onChange={(event) =>
+                              updateEditableKeyProject({
+                                dontShowInSingularStories: event.target.value === "hidden"
+                              })
+                            }
+                            value={activeKeyProjectView.dontShowInSingularStories ? "hidden" : "shown"}
+                          >
+                            <option value="shown">Shown in Singular Stories</option>
+                            <option value="hidden">Hidden in Singular Stories</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <DetailMetaItem label="Visibility" value={activeKeyProjectView.dontShowInSingularStories ? "Hidden in Singular Stories" : "Shown in Singular Stories"} />
+                      )}
                     </div>
+                  </section>
+
+                  <section className="client-okrs-key-project-section">
+                    <div className="client-okrs-detail-card-head">
+                      <span>Related Key Result</span>
+                      <button
+                        className="client-okrs-key-project-suggest-button"
+                        disabled={isLinkingKeyProjectResult || allProjectKeyResults.length === 0}
+                        onClick={() => void openKeyProjectSuggestionModal()}
+                        type="button"
+                      >
+                        Suggest KR
+                      </button>
+                    </div>
+                    {linkedKeyResultsForActiveKeyProject.length > 0 ? (
+                      <div className="client-okrs-kp-linked-kr-list">
+                        {linkedKeyResultsForActiveKeyProject.map(({ keyResult, objective }) => (
+                          <article key={keyResult.id}>
+                            <span>{keyResult.code || "KR"}</span>
+                            <div>
+                              <strong>{getKeyResultDisplayTitle(keyResult)}</strong>
+                              <small>{getObjectiveTitle(objective)}</small>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="client-okrs-kp-linked-empty">
+                        No Key Result linked yet. Use IA suggestions or search manually.
+                      </p>
+                    )}
                   </section>
 
                   <section className="client-okrs-key-project-section">
@@ -3756,38 +5313,62 @@ function OkrDetailModal({
                     <div className="client-okrs-key-project-score-grid">
                       <div>
                         <span>Final Score</span>
-                        <strong>{activeKeyProject.finalScore}%</strong>
-                        <div className="client-okrs-progress-track">
-                          <span style={{ width: `${activeKeyProject.finalScore}%` }} />
-                        </div>
+                        <strong>{activeKeyProjectView.finalScore}%</strong>
                       </div>
                       <div>
                         <span>Quality Score</span>
-                        <strong>{activeKeyProject.qualityScore}%</strong>
-                        <div className="client-okrs-progress-track">
-                          <span style={{ width: `${activeKeyProject.qualityScore}%` }} />
-                        </div>
+                        <strong>{activeKeyProjectView.qualityScore}%</strong>
                       </div>
-                      <div>
+                      <div className={isEditingKeyProject ? "is-editing" : undefined}>
                         <span>Clarity</span>
-                        <strong>{formatNumberValue(activeKeyProject.clarity)}</strong>
-                        <div className="client-okrs-progress-track">
-                          <span style={{ width: `${activeKeyProject.clarity === null ? 0 : Math.min(100, activeKeyProject.clarity * 10)}%` }} />
-                        </div>
+                        {isEditingKeyProject ? (
+                          <KeyProjectScoreInput
+                            label="Clarity"
+                            onChange={(value) => updateEditableKeyProject({ clarity: value })}
+                            value={activeKeyProjectView.clarity}
+                          />
+                        ) : (
+                          <strong>{formatOneDecimalValue(activeKeyProjectView.clarity)}</strong>
+                        )}
+                        {!isEditingKeyProject ? (
+                          <div className="client-okrs-progress-track">
+                            <span style={{ width: `${activeKeyProjectView.clarity === null ? 0 : Math.min(100, activeKeyProjectView.clarity * 10)}%` }} />
+                          </div>
+                        ) : null}
                       </div>
-                      <div>
+                      <div className={isEditingKeyProject ? "is-editing" : undefined}>
                         <span>Strategic Focus</span>
-                        <strong>{formatNumberValue(activeKeyProject.strategicFocus)}</strong>
-                        <div className="client-okrs-progress-track">
-                          <span style={{ width: `${activeKeyProject.strategicFocus === null ? 0 : Math.min(100, activeKeyProject.strategicFocus * 10)}%` }} />
-                        </div>
+                        {isEditingKeyProject ? (
+                          <KeyProjectScoreInput
+                            label="Strategic Focus"
+                            onChange={(value) => updateEditableKeyProject({ strategicFocus: value })}
+                            value={activeKeyProjectView.strategicFocus}
+                          />
+                        ) : (
+                          <strong>{formatOneDecimalValue(activeKeyProjectView.strategicFocus)}</strong>
+                        )}
+                        {!isEditingKeyProject ? (
+                          <div className="client-okrs-progress-track">
+                            <span style={{ width: `${activeKeyProjectView.strategicFocus === null ? 0 : Math.min(100, activeKeyProjectView.strategicFocus * 10)}%` }} />
+                          </div>
+                        ) : null}
                       </div>
-                      <div>
-                        <span>Value Orientation</span>
-                        <strong>{formatNumberValue(activeKeyProject.valueOrientation)}</strong>
-                        <div className="client-okrs-progress-track">
-                          <span style={{ width: `${activeKeyProject.valueOrientation === null ? 0 : Math.min(100, activeKeyProject.valueOrientation * 10)}%` }} />
-                        </div>
+                      <div className={isEditingKeyProject ? "is-editing" : undefined}>
+                        <span title="Value Orientation">Value Orient...</span>
+                        {isEditingKeyProject ? (
+                          <KeyProjectScoreInput
+                            label="Value Orientation"
+                            onChange={(value) => updateEditableKeyProject({ valueOrientation: value })}
+                            value={activeKeyProjectView.valueOrientation}
+                          />
+                        ) : (
+                          <strong>{formatOneDecimalValue(activeKeyProjectView.valueOrientation)}</strong>
+                        )}
+                        {!isEditingKeyProject ? (
+                          <div className="client-okrs-progress-track">
+                            <span style={{ width: `${activeKeyProjectView.valueOrientation === null ? 0 : Math.min(100, activeKeyProjectView.valueOrientation * 10)}%` }} />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </section>
@@ -3797,16 +5378,83 @@ function OkrDetailModal({
                       <span>Workflow</span>
                     </div>
                     <div className="client-okrs-meta-grid">
-                      <DetailMetaItem label="Status" value={activeKeyProject.status} />
-                      <DetailMetaItem label="Created" value={formatDateTimeValue(activeKeyProject.createdAt)} />
-                      <DetailMetaItem label="Last Updated" value={formatDateTimeValue(activeKeyProject.epicUpdatedAt)} />
+                      {isEditingKeyProject ? (
+                        <label className="client-okrs-meta-item is-editing">
+                          <span>Status</span>
+                          <select
+                            onChange={(event) => updateEditableKeyProject({ status: event.target.value })}
+                            value={activeKeyProjectView.status || keyProjectStatusOptions[0]}
+                          >
+                            {keyProjectStatusOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <DetailMetaItem label="Status" value={activeKeyProjectView.status} />
+                      )}
+                      <DetailMetaItem label="Created" value={formatDateTimeValue(activeKeyProjectView.createdAt)} />
+                      <DetailMetaItem label="Last Updated" value={formatDateTimeValue(activeKeyProjectView.epicUpdatedAt)} />
                     </div>
                   </section>
 
                   <section className="client-okrs-key-project-text-stack">
-                    <div>
-                      <span>Justification</span>
-                      <p>{displayValue(activeKeyProject.justification)}</p>
+                    <div className="client-okrs-key-project-text-card">
+                      <div className="client-okrs-key-project-text-card-head">
+                        <span>Epic Story</span>
+                        {isEditingKeyProject ? (
+                          <button
+                            aria-label="Edit Epic Story"
+                            onClick={() =>
+                              openKeyProjectTextEditor({
+                                field: "story",
+                                label: "Epic Story",
+                                maxLength: 1400,
+                                title: "Edit Epic Story",
+                                value: activeKeyProjectView.story
+                              })
+                            }
+                            type="button"
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
+                      <p>{activeKeyProjectView.story || "No story set"}</p>
+                    </div>
+                  </section>
+
+                  <section className="client-okrs-key-project-text-stack">
+                    <div className="client-okrs-key-project-text-card">
+                      <div className="client-okrs-key-project-text-card-head">
+                        <span>Justification</span>
+                        {isEditingKeyProject ? (
+                          <button
+                            aria-label="Edit Justification"
+                            onClick={() =>
+                              openKeyProjectTextEditor({
+                                field: "justification",
+                                label: "Justification",
+                                maxLength: 1800,
+                                title: "Edit Justification",
+                                value: activeKeyProjectView.justification
+                              })
+                            }
+                            type="button"
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
+                      <p>{displayValue(activeKeyProjectView.justification)}</p>
                     </div>
                   </section>
                 </section>
@@ -3815,17 +5463,23 @@ function OkrDetailModal({
               <>
                 <span className="client-okrs-section-label">Key Projects</span>
                 {keyProjects.map((keyProject) => {
-                  const progress = keyProject.qualityScore || keyProject.finalScore;
+                  const keyProjectView = getHydratedKeyProject(keyProject) ?? keyProject;
+                  const progress = keyProjectView.qualityScore || keyProjectView.finalScore;
+                  const relatedKeyResultLabel = getKeyProjectRelatedKeyResultLabel(
+                    keyProjectView,
+                    allProjectKeyResults
+                  );
+                  const linkSyncStatus = optimisticKeyProjectLinksById[keyProjectView.id]?.status;
 
                   return (
                     <article
                       className="client-okrs-related-key-project-card"
-                      key={keyProject.id}
-                      onClick={() => setActiveKeyProject(keyProject)}
+                      key={keyProjectView.id}
+                      onClick={() => setActiveKeyProject(keyProjectView)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setActiveKeyProject(keyProject);
+                          setActiveKeyProject(keyProjectView);
                         }
                       }}
                       role="button"
@@ -3833,15 +5487,34 @@ function OkrDetailModal({
                     >
                       <div className="client-okrs-related-key-project-head">
                         <div>
-                          <h3>{keyProject.name || keyProject.story || "Untitled Key Project"}</h3>
+                          <h3>{keyProjectView.name || keyProjectView.story || "Untitled Key Project"}</h3>
                           <p>
-                            {keyProject.totalStories ?? 0} stories
+                            {keyProjectView.totalStories ?? 0} stories
                             <span>{progress}% score</span>
                           </p>
+                          <p className="client-okrs-related-key-project-kr">
+                            KR: {relatedKeyResultLabel || "No Key Result linked"}
+                            {relatedKeyResultLabel && linkSyncStatus === "synced" ? (
+                              <span className="client-okrs-related-key-project-sync-chip">Synced</span>
+                            ) : null}
+                          </p>
                         </div>
-                        <span className={`client-okrs-related-key-project-status${getKeyProjectStatusClass(keyProject.status)}`}>
-                          {keyProject.status || "In Progress"}
-                        </span>
+                        <div className="client-okrs-related-key-project-card-actions">
+                          <button
+                            className="client-okrs-key-project-suggest-button"
+                            disabled={isLoadingKeyProjectSuggestions || isLinkingKeyProjectResult}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openKeyProjectSuggestionModal(keyProjectView);
+                            }}
+                            type="button"
+                          >
+                            Suggest KR
+                          </button>
+                          <span className={`client-okrs-related-key-project-status${getKeyProjectStatusClass(keyProjectView.status)}`}>
+                            {keyProjectView.status || "In Progress"}
+                          </span>
+                        </div>
                       </div>
                       <div className="client-okrs-progress-track is-wide">
                         <span style={{ width: `${progress}%` }} />
@@ -3870,17 +5543,171 @@ function OkrDetailModal({
         {activeHistoryKeyResult ? (
             <KeyResultHistoryPanel
               initialHistory={
-                keyResultHistoryCache?.[activeHistoryKeyResult.id]?.status === "ready"
-                  ? keyResultHistoryCache[activeHistoryKeyResult.id].history
+                getKeyResultHistoryState(activeHistoryKeyResult.id)?.status === "ready"
+                  ? getKeyResultHistoryState(activeHistoryKeyResult.id)?.history
                   : undefined
               }
               keyResult={activeHistoryKeyResult}
               objective={editableObjective}
               onClose={() => setActiveHistoryKeyResult(null)}
+              onHistoryChanged={(history) => {
+                setLocalHistoryByKeyResultId((current) => ({
+                  ...current,
+                  [activeHistoryKeyResult.id]: {
+                    history,
+                    status: "ready"
+                  }
+                }));
+              }}
+              onLatestValuesChanged={(values) => {
+                const projectId = editableObjective.projectIds[0] ?? "";
+
+                applyOptimisticKeyResultValues(activeHistoryKeyResult.id, values);
+                if (projectId) {
+                  void syncKeyResultAfterSingularUpdate({
+                    expectedValues: values,
+                    keyResultId: activeHistoryKeyResult.id,
+                    projectId
+                  });
+                }
+              }}
+              onToast={onProjectToast}
               sentimentAnalysis={keyResultSentiments[activeHistoryKeyResult.id]}
             />
         ) : null}
+        {isKeyProjectSuggestionOpen && keyProjectSuggestionView ? (
+          <div aria-modal="true" className="client-okrs-kr-suggestion-layer" role="dialog">
+            <section className="client-okrs-kr-suggestion-modal">
+              <div className="client-okrs-kr-suggestion-head">
+                <div>
+                  <span className="client-okrs-section-label">IA Match</span>
+                  <h3>Sugerencias de Key Results</h3>
+                  <p>{keyProjectSuggestionView.name || "Untitled Key Project"}</p>
+                </div>
+                <button
+                  aria-label="Close Key Result suggestions"
+                  disabled={isLinkingKeyProjectResult}
+                  onClick={() => {
+                    setIsKeyProjectSuggestionOpen(false);
+                    setKeyProjectSuggestionTarget(null);
+                    setPendingKeyProjectLinkKeyResult(null);
+                  }}
+                  type="button"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {isLoadingKeyProjectSuggestions ? (
+                <div className="client-okrs-kr-suggestion-state">
+                  <span className="client-okrs-account-loading-dots" aria-label="Loading suggestions">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  <p>Buscando los KRs mas relacionados.</p>
+                </div>
+              ) : (
+                <>
+                  {keyProjectSuggestions.length > 0 ? (
+                    <div className="client-okrs-kr-suggestion-list">
+                      {keyProjectSuggestions.map((suggestion, index) => (
+                        <button
+                          className="client-okrs-kr-suggestion-card"
+                          disabled={isLinkingKeyProjectResult}
+                          key={suggestion.keyResult.id}
+                          onClick={() => requestLinkKeyProjectToKeyResult(suggestion.keyResult)}
+                          type="button"
+                        >
+                          <span>{index + 1}</span>
+                          <div>
+                            <strong>{getKeyResultDisplayTitle(suggestion.keyResult)}</strong>
+                            <small>{suggestion.objective.title}</small>
+                            <p>{suggestion.reason}</p>
+                          </div>
+                          <b>{suggestion.confidence}%<small>certeza</small></b>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="client-okrs-kr-suggestion-state">
+                      <strong>No hay una recomendacion clara</strong>
+                      <p>Busca manualmente entre todos los Key Results del proyecto.</p>
+                    </div>
+                  )}
+
+                  <div className="client-okrs-kr-search-block">
+                    <div className="client-okrs-kr-search-separator">
+                      <span />
+                      <small>o</small>
+                      <span />
+                    </div>
+                    <label>
+                      <span>Buscar otro Key Result</span>
+                      <input
+                        autoComplete="off"
+                        onChange={(event) => setKeyProjectSearchQuery(event.target.value)}
+                        placeholder="Buscar por nombre, objetivo o palabra clave..."
+                        value={keyProjectSearchQuery}
+                      />
+                    </label>
+                    <div className="client-okrs-kr-search-results">
+                      {filteredKeyProjectSearchResults.slice(0, 12).map(({ keyResult, objective }) => (
+                        <button
+                          disabled={isLinkingKeyProjectResult}
+                          key={`${objective.id}-${keyResult.id}`}
+                          onClick={() => requestLinkKeyProjectToKeyResult(keyResult)}
+                          type="button"
+                        >
+                          <strong>{keyResult.code ? `${keyResult.code}: ` : "KR: "}{getKeyResultDisplayTitle(keyResult)}</strong>
+                          <small>{getObjectiveTitle(objective)}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {keyProjectSuggestionError ? (
+                <p className="client-okrs-kr-suggestion-error">{keyProjectSuggestionError}</p>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
       </aside>
+      {pendingKeyProjectLinkKeyResult && keyProjectSuggestionView ? (
+        <div aria-modal="true" className="client-okrs-app-confirm-layer" role="dialog">
+          <section className="client-okrs-app-confirm-card">
+            <p>
+              Vas a actualizar este Key Project con el KR seleccionado:
+              {" "}
+              <strong>{getKeyResultDisplayTitle(pendingKeyProjectLinkKeyResult)}</strong>.
+              ¿Quieres continuar?
+            </p>
+            <div>
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isLinkingKeyProjectResult}
+                onClick={() => setPendingKeyProjectLinkKeyResult(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="client-okrs-app-confirm-primary"
+                disabled={isLinkingKeyProjectResult}
+                onClick={() => void linkKeyProjectToKeyResult(pendingKeyProjectLinkKeyResult)}
+                type="button"
+              >
+                {isLinkingKeyProjectResult ? "Updating..." : "Update"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {isCloseConfirmOpen ? (
         <div aria-modal="true" className="client-okrs-app-confirm-layer" role="dialog">
           <section className="client-okrs-app-confirm-card">
@@ -3962,6 +5789,102 @@ function OkrDetailModal({
           </section>
         </div>
       ) : null}
+      {isKeyProjectUpdateConfirmOpen ? (
+        <div aria-modal="true" className="client-okrs-app-confirm-layer" role="dialog">
+          <section className="client-okrs-app-confirm-card">
+            <p>Vas a guardar los cambios de este Key Project en Singular AGILE. ¿Quieres continuar?</p>
+            <div className="client-okrs-app-confirm-actions has-three-actions">
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isUpdatingKeyProject}
+                onClick={() => setIsKeyProjectUpdateConfirmOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="client-okrs-app-confirm-secondary"
+                disabled={isUpdatingKeyProject}
+                onClick={discardEditableKeyProjectChanges}
+                type="button"
+              >
+                Discard
+              </button>
+              <button
+                className="client-okrs-app-confirm-primary"
+                disabled={isUpdatingKeyProject}
+                onClick={() => void saveEditableKeyProject()}
+                type="button"
+              >
+                {isUpdatingKeyProject ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {isKeyProjectNameEditorOpen || keyProjectTextEditor ? (
+        <div aria-modal="true" className="client-okrs-app-confirm-layer client-okrs-key-project-name-layer" role="dialog">
+          <section className="client-okrs-key-project-name-modal">
+            <div className="client-okrs-key-project-name-modal-head">
+              <div>
+                <span>{keyProjectTextEditor?.label ?? "Epic Name"}</span>
+                <h3>{keyProjectTextEditor?.title ?? "Edit Key Project title"}</h3>
+              </div>
+              <button
+                aria-label={keyProjectTextEditor ? `Close ${keyProjectTextEditor.label} editor` : "Close Epic Name editor"}
+                onClick={keyProjectTextEditor ? closeKeyProjectTextEditor : () => {
+                  setIsKeyProjectNameEditorOpen(false);
+                  setKeyProjectNameDraft("");
+                }}
+                type="button"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+            <textarea
+              aria-label={keyProjectTextEditor?.label ?? "Epic Name"}
+              autoFocus
+              className="client-okrs-key-project-name-textarea"
+              maxLength={keyProjectTextEditor?.maxLength ?? 180}
+              onChange={(event) =>
+                keyProjectTextEditor
+                  ? setKeyProjectTextDraft(event.target.value)
+                  : setKeyProjectNameDraft(event.target.value)
+              }
+              rows={keyProjectTextEditor ? 6 : 4}
+              value={keyProjectTextEditor ? keyProjectTextDraft : keyProjectNameDraft}
+            />
+            <div className="client-okrs-key-project-name-modal-foot">
+              <small>
+                {(keyProjectTextEditor ? keyProjectTextDraft : keyProjectNameDraft).trim().length}/
+                {keyProjectTextEditor?.maxLength ?? 180}
+              </small>
+              <div>
+                <button
+                  className="client-okrs-key-project-name-button is-secondary"
+                  onClick={keyProjectTextEditor ? closeKeyProjectTextEditor : () => {
+                    setIsKeyProjectNameEditorOpen(false);
+                    setKeyProjectNameDraft("");
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="client-okrs-key-project-name-button is-primary"
+                  onClick={keyProjectTextEditor ? applyKeyProjectTextDraft : applyKeyProjectNameDraft}
+                  type="button"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -4020,6 +5943,7 @@ export function ClientOkrsMock({
   const [activeOkr, setActiveOkr] = useState<AgileObjective | null>(null);
   const [activeOkrIndex, setActiveOkrIndex] = useState(1);
   const [activeOkrInitialTab, setActiveOkrInitialTab] = useState<OkrDetailTab>("overview");
+  const [activeOkrTargetKeyResultId, setActiveOkrTargetKeyResultId] = useState<string | null>(null);
   const [activePortfolioProjectId, setActivePortfolioProjectId] = useState<string | null>(null);
   const [isLoadingPortfolioProject, setIsLoadingPortfolioProject] = useState(false);
   const [portfolioProjectError, setPortfolioProjectError] = useState<string | null>(null);
@@ -4035,6 +5959,14 @@ export function ClientOkrsMock({
   const objectiveSyncPollRunRef = useRef(0);
   const initialProjectIdRef = useRef(initialProjectId);
   const isLoadingProjects = projectsStatus === "idle" || projectsStatus === "loading";
+  const toast = useToast();
+
+  function showProjectToast(tone: AppToastTone, title: string | null, message: string) {
+    toast[tone]({
+      message,
+      title
+    });
+  }
 
   useEffect(() => {
     void ensureProjects().catch(() => undefined);
@@ -4459,6 +6391,7 @@ export function ClientOkrsMock({
     setActiveOkr(null);
     setActiveOkrIndex(1);
     setActiveOkrInitialTab("overview");
+    setActiveOkrTargetKeyResultId(null);
     setActivePortfolioProjectId(null);
     setPortfolioProjectError(null);
     setIsLoadingPortfolioProject(false);
@@ -4490,6 +6423,7 @@ export function ClientOkrsMock({
     setActiveOkr(null);
     setActiveOkrIndex(1);
     setActiveOkrInitialTab("overview");
+    setActiveOkrTargetKeyResultId(null);
     setActivePortfolioProjectId(null);
     setPortfolioProjectError(null);
     setIsLoadingPortfolioProject(false);
@@ -4560,6 +6494,7 @@ export function ClientOkrsMock({
         portfolioTab: "kr-trends"
       });
       setActiveOkrInitialTab("key-results");
+      setActiveOkrTargetKeyResultId(keyResult.id);
       setActiveOkrIndex(objectiveIndex + 1);
       setActiveOkr(objective);
       return true;
@@ -4577,6 +6512,7 @@ export function ClientOkrsMock({
     setActiveOkr(null);
     setActiveOkrIndex(1);
     setActiveOkrInitialTab("key-results");
+    setActiveOkrTargetKeyResultId(keyResult.id);
     setNewRecordType(null);
 
     if (project.id === selectedProjectId && openKeyResultObjective(okrs)) {
@@ -4631,6 +6567,7 @@ export function ClientOkrsMock({
       portfolioTab: "summary"
     });
     setActiveOkrInitialTab("overview");
+    setActiveOkrTargetKeyResultId(null);
     setActiveOkrIndex(index + 1);
     setActiveOkr(objective);
   }
@@ -4671,6 +6608,7 @@ export function ClientOkrsMock({
       );
       setActiveOkrReturnContext(null);
       setActiveOkrInitialTab("overview");
+      setActiveOkrTargetKeyResultId(null);
       setActiveOkrIndex(objectiveIndex + 1);
       setActiveOkr(syncedObjective);
       return;
@@ -4719,6 +6657,7 @@ export function ClientOkrsMock({
       if (objective) {
         setActiveOkrReturnContext(null);
         setActiveOkrInitialTab("overview");
+        setActiveOkrTargetKeyResultId(null);
         setActiveOkrIndex(objectiveIndex + 1);
         setActiveOkr(objective);
       }
@@ -4733,6 +6672,7 @@ export function ClientOkrsMock({
       if (objective) {
         setActiveOkrReturnContext(null);
         setActiveOkrInitialTab("key-results");
+        setActiveOkrTargetKeyResultId(null);
         setActiveOkrIndex(objectiveIndex + 1);
         setActiveOkr(objective);
       }
@@ -4746,6 +6686,7 @@ export function ClientOkrsMock({
       if (objective) {
         setActiveOkrReturnContext(null);
         setActiveOkrInitialTab("key-projects");
+        setActiveOkrTargetKeyResultId(null);
         setActiveOkrIndex(1);
         setActiveOkr(objective);
       }
@@ -4757,6 +6698,7 @@ export function ClientOkrsMock({
 
     setActiveOkr(null);
     setActiveOkrReturnContext(null);
+    setActiveOkrTargetKeyResultId(null);
 
     if (returnContext) {
       setActiveMainTab(returnContext.mainTab);
@@ -4772,6 +6714,23 @@ export function ClientOkrsMock({
       )
     );
     invalidateProject(selectedProjectId);
+  }
+
+  function handleKeyProjectUpdated(updatedKeyProject: AgileKeyProject, options?: KeyProjectUpdatedOptions) {
+    setKeyProjects((currentKeyProjects) =>
+      currentKeyProjects.map((keyProject) =>
+        keyProject.id === updatedKeyProject.id ? updatedKeyProject : keyProject
+      )
+    );
+    invalidateProject(selectedProjectId);
+    if (options?.silent) {
+      return;
+    }
+    showProjectToast(
+      "success",
+      "Key Project guardado",
+      "Los cambios se guardaron correctamente."
+    );
   }
 
   return (
@@ -4989,6 +6948,7 @@ export function ClientOkrsMock({
               onOpen={() => {
                 setActiveOkrReturnContext(null);
                 setActiveOkrInitialTab("overview");
+                setActiveOkrTargetKeyResultId(null);
                 setActiveOkrIndex(index + 1);
                 setActiveOkr(okr);
               }}
@@ -5011,6 +6971,7 @@ export function ClientOkrsMock({
                   onClick={() => {
                     setActiveOkrReturnContext(null);
                     setActiveOkrInitialTab("key-results");
+                    setActiveOkrTargetKeyResultId(keyResult.id);
                     setActiveOkrIndex(okrIndex + 1);
                     setActiveOkr(okr);
                   }}
@@ -5019,6 +6980,7 @@ export function ClientOkrsMock({
                       event.preventDefault();
                       setActiveOkrReturnContext(null);
                       setActiveOkrInitialTab("key-results");
+                      setActiveOkrTargetKeyResultId(keyResult.id);
                       setActiveOkrIndex(okrIndex + 1);
                       setActiveOkr(okr);
                     }
@@ -5028,7 +6990,7 @@ export function ClientOkrsMock({
                 >
                   <div>
                     <span>{keyResult.code || `KR ${okrIndex + 1}.${keyResultIndex + 1}`}</span>
-                    <h3>{keyResult.title}</h3>
+                    <h3>{getKeyResultDisplayTitle(keyResult)}</h3>
                     <p>{keyResult.explanation || keyResult.metric || getObjectiveDescription(okr)}</p>
                   </div>
                   <div className="client-okrs-key-result-meta">
@@ -5065,7 +7027,9 @@ export function ClientOkrsMock({
 
       {activeOkr ? (
         <OkrDetailModal
+          allObjectives={okrs}
           initialTab={activeOkrInitialTab}
+          initialTargetKeyResultId={activeOkrTargetKeyResultId}
           initialKeyResultSentiments={projectKeyResultAnalyses.filter((analysis) =>
             getObjectiveKeyResults(activeOkr).some((keyResult) => keyResult.id === analysis.keyResultId)
           )}
@@ -5074,7 +7038,9 @@ export function ClientOkrsMock({
           okr={activeOkr}
           okrIndex={activeOkrIndex}
           onClose={handleCloseActiveOkr}
+          onKeyProjectUpdated={handleKeyProjectUpdated}
           onObjectiveUpdated={handleObjectiveUpdated}
+          onProjectToast={showProjectToast}
           projects={projects}
         />
       ) : null}

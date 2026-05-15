@@ -66,8 +66,8 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as SingularAgileKeyResultUpdateInput;
     const projectId = getProjectIdFromBody(body);
 
-    if (!body.recordId?.trim()) {
-      return NextResponse.json({ message: "El recordId es obligatorio." }, { status: 400 });
+    if (!body.recordId?.trim() && !body.sourceId?.trim() && !body.source_id?.trim()) {
+      return NextResponse.json({ message: "El recordId o source_id es obligatorio." }, { status: 400 });
     }
 
     if (projectId) {
