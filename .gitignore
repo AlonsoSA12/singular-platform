@@ -1,0 +1,13 @@
+.DS_Store
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+*.tsbuildinfo
+.env
+.env.local
+.vercel
+frontend/.vercel
+backend/.vercel
+.github/instructions/codacy.instructions.md

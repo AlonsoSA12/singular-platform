@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TrustworthinessAssistantReply",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "message",
+    "nextIntent",
+    "focusArea",
+    "proposal",
+    "proposalChanged",
+    "changeSource",
+    "needsOptionalEvidence",
+    "evidenceQuestion",
+    "citations"
+  ],
+  "properties": {
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Spanish response shown to the evaluator."
+    },
+    "nextIntent": {
+      "type": "string",
+      "enum": [
+        "review",
+        "edit_pillar",
+        "edit_feedback",
+        "save",
+        "clarify"
+      ]
+    },
+    "focusArea": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "reliability",
+        "intimacy",
+        "groupThinking",
+        "credibility",
+        "feedback",
+        null
+      ]
+    },
+    "proposalChanged": {
+      "type": "boolean",
+      "description": "True only when the returned proposal differs from the input proposal."
+    },
+    "changeSource": {
+      "type": "string",
+      "enum": [
+        "model_evidence",
+        "human_override",
+        "mixed",
+        "none"
+      ],
+      "description": "Origin of the latest proposal change."
+    },
+    "needsOptionalEvidence": {
+      "type": "boolean",
+      "description": "True only when a short optional human rationale would improve traceability."
+    },
+    "evidenceQuestion": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "At most one optional question for human rationale; never a blocker."
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reliabilityPoints",
+        "intimacyPoints",
+        "groupThinkingPoints",
+        "credibilityPoints",
+        "feedback"
+      ],
+      "properties": {
+        "reliabilityPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "intimacyPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "groupThinkingPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "credibilityPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "feedback": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Professional English feedback draft."
+        }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "description": "Meeting evidence referenced by the assistant.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "meetingId",
+          "meetingTitle",
+          "reason",
+          "pillar"
+        ],
+        "properties": {
+          "meetingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "meetingTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pillar": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "reliability",
+              "intimacy",
+              "groupThinking",
+              "credibility",
+              null
+            ]
+          }
+        }
+      }
+    }
+  }
+}
